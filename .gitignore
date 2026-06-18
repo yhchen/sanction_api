@@ -1,0 +1,11 @@
+node_modules/
+dist/
+coverage/
+.env
+.env.*
+!.env.example
+
+# Local OpenSanctions data files (large/private runtime inputs)
+senzing.json
+targets.nested.json
+entities.ftm.json
