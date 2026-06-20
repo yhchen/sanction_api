@@ -54,12 +54,28 @@ function createApprovalAccessControl(whitelist: string, options: ApprovalAccessC
   );
 }
 
+interface ApprovalHandler {
+  handleStart(userId: string | number | undefined): Promise<BotReplyWithNotifications>;
+  handleMessage(rawMessage: string, userId: string | number | undefined, metadata?: unknown): Promise<BotReplyWithNotifications>;
+}
+
+interface BotReplyWithNotifications {
+  text: string;
+  buttons: Array<Array<{ text: string; callbackData: string }>>;
+  notifications?: Array<{ chatId: string; text: string }>;
+}
+
 function createApprovalHandler(
   service: DebarmentService,
   accessControl: ReturnType<typeof createAccessControl>,
   approvedUsers: InMemoryApprovedUsers,
-): BotCommandHandler {
-  return new BotCommandHandler(service, accessControl, approvedUsers);
+): ApprovalHandler {
+  const Handler = BotCommandHandler as unknown as new (
+    service: DebarmentService,
+    accessControl: ReturnType<typeof createAccessControl>,
+    approvedUsers: InMemoryApprovedUsers,
+  ) => ApprovalHandler;
+  return new Handler(service, accessControl, approvedUsers);
 }
 
 describe('normalized exact matching', () => {
@@ -283,9 +299,12 @@ describe('access control and pure handlers', () => {
       approvedUsers,
     );
 
-    await expect(handler.handleMessage('/request', 123)).resolves.toMatchObject({
+    const reply = await handler.handleMessage('/request', 123);
+
+    expect(reply).toMatchObject({
       text: 'No admins are configured. Ask the bot operator to set ADMIN_TELEGRAM_USERS.',
     });
+    expect(reply.notifications).toBeUndefined();
   });
 
   test('admin can approve by id and approved user is notified', async () => {
