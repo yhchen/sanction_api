@@ -1,30 +1,61 @@
 # Sanction API Telegram Bot
 
-Node/TypeScript Telegram bot for Debarred lookups over OpenSanctions-derived local files.
+这是一个基于 Node.js / TypeScript 的 Telegram 机器人，用本地 OpenSanctions 衍生数据文件做 Debarred 名单查询。机器人支持私有部署、管理员批准访问、基础信息查询和完整制裁详情查询。
 
-## V1 data sources
+## 功能概览
 
-- `senzing.json`: primary startup in-memory name index and `/basic` data source.
-- `targets.nested.json`: `/full` nested sanctions details keyed by OpenSanctions record id.
-- `entities.ftm.json`: inspected but not used as the V1 query source.
+- 通过 Telegram 查询完整名称是否命中 Debarred 记录。
+- 支持纯文本查询；发送名称等同于执行 `/check <name>`。
+- 支持 `/check`、`/basic`、`/full` 三类查询命令。
+- 命中后会返回 `/basic` 和 `/full` 内联按钮，便于继续查看详情。
+- 支持三种访问控制模式：公开、静态白名单、管理员批准。
+- 未授权用户可发送 `/request` 申请访问；管理员可用 `/approve` 批准。
 
-## Matching and behavior
+## 数据文件
 
-- Matching is normalized exact match over complete `NAMES[].NAME_FULL` primary/alias values.
-- Partial names do not match. Example: `Yatai Smart` is not the same as `YATAI SMART INDUSTRIAL NEW CITY`.
-- Only records with risk topic `debarment` are reported as `Debarred`.
-- Plain text names behave like `/check <name>`.
-- Positive `/check` replies include `/basic` and `/full` inline buttons.
-- `/basic <name>` and `/full <name>` are available as direct commands.
+运行时默认读取以下本地文件：
 
-## Configuration
+| 文件 | 用途 |
+| --- | --- |
+| `senzing.json` | 启动时加载到内存，建立名称索引；也是 `/basic` 的数据来源。 |
+| `targets.nested.json` | 通过 OpenSanctions record id 读取 `/full` 制裁详情。 |
+| `entities.ftm.json` | V1 阶段只做过评估，不作为当前查询数据源。 |
 
-Set environment variables before running:
+注意：虽然文件名是 `.json`，当前读取逻辑按 JSONL 处理，也就是每一行都是一个独立 JSON 对象。
+
+## 匹配规则
+
+- 查询使用规范化后的完整名称精确匹配，来源是 `NAMES[].NAME_FULL` 的主名称和别名。
+- 不支持部分名称匹配。例如：`Yatai Smart` 不等同于 `YATAI SMART INDUSTRIAL NEW CITY`。
+- 只有包含风险主题 `debarment` 的记录会返回为 `Debarred`。
+- `/basic <name>` 返回基础记录信息。
+- `/full <name>` 返回制裁详情。
+- 当消息不是命令时，机器人会把纯文本内容当作 `/check <name>` 处理。
+
+## 快速开始
+
+### 1. 准备环境
+
+需要：
+
+- Node.js 20 或更高版本。
+- 一个 Telegram Bot Token。
+- 本地数据文件：`senzing.json` 和 `targets.nested.json`。
+
+安装依赖：
+
+```bash
+npm install
+```
+
+### 2. 配置环境变量
+
+最小配置示例：
 
 ```bash
 export TELEGRAM_BOT_TOKEN="<bot-token>"
-export ALLOWED_TELEGRAM_USERS="" # "*" makes the bot public; comma-separated IDs are statically allowed
-export ADMIN_TELEGRAM_USERS="123456789" # comma-separated Telegram numeric user ids that can approve access
+export ALLOWED_TELEGRAM_USERS=""
+export ADMIN_TELEGRAM_USERS="123456789"
 export APPROVED_TELEGRAM_USERS_PATH="./approved-users.json"
 export SENZING_PATH="./senzing.json"
 export TARGETS_NESTED_PATH="./targets.nested.json"
@@ -32,68 +63,112 @@ export MAX_RESULTS="5"
 export MAX_MESSAGE_CHARS="3800"
 ```
 
-Access control supports three modes:
+也可以复制 `.env.example` 作为部署配置模板，但运行方式需要确保这些变量已经注入到进程环境中。
 
-- Public: set `ALLOWED_TELEGRAM_USERS=*`.
-- Static private: set `ALLOWED_TELEGRAM_USERS="123,456"`.
-- Admin-approved: set `ADMIN_TELEGRAM_USERS="123"` and keep `APPROVED_TELEGRAM_USERS_PATH` pointed at a writable local JSON file. Unauthorized users can send `/request`; admins can approve with `/approve <telegram_user_id>` or by replying `/approve` to the bot's request notification.
+### 3. 启动机器人
 
-The runtime `approved-users.json` file contains real Telegram user IDs and is ignored by git.
+生产方式：
 
-## Telegram setup guide
-
-### 1. Create the bot in Telegram
-
-1. Open Telegram and search for the official `@BotFather`.
-2. Send `/newbot`.
-3. Follow BotFather's prompts to choose a bot display name and a unique bot username ending in `bot`.
-4. Copy the token that BotFather returns. Use it as `TELEGRAM_BOT_TOKEN`.
-
-Keep the token secret. Anyone with the token can control the bot.
-
-### 2. Configure the Telegram command menu
-
-In `@BotFather`, use `/mybots`, choose this bot, then use **Edit Bot > Edit Commands**. Send this command list:
-
-```text
-start - Show help and access status
-request - Request access from an admin
-check - Check a complete name for Debarred status
-basic - Show basic record information
-full - Show full sanctions details
-approve - Admin: approve a Telegram user id
+```bash
+npm run build
+node dist/index.js
 ```
 
-Telegram shows these commands in the bot chat menu when users type `/` or tap the menu button.
+开发方式：
 
-### 3. Get the admin Telegram user ID
+```bash
+npm run dev
+```
 
-`ADMIN_TELEGRAM_USERS` must contain numeric Telegram user IDs, not usernames.
+## 环境变量说明
 
-Recommended bootstrap flow:
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `TELEGRAM_BOT_TOKEN` | 无 | 必填。由 Telegram `@BotFather` 生成的机器人 token。 |
+| `ALLOWED_TELEGRAM_USERS` | 空字符串 | 访问控制白名单。`*` 表示公开；逗号分隔的数字 ID 表示静态白名单；空字符串可配合管理员批准模式。 |
+| `ADMIN_TELEGRAM_USERS` | 空字符串 | 管理员 Telegram 数字用户 ID，多个 ID 用逗号分隔。管理员可批准访问申请。 |
+| `APPROVED_TELEGRAM_USERS_PATH` | `./approved-users.json` | 管理员批准后的用户 ID 存储文件。运行进程必须有写入权限。 |
+| `SENZING_PATH` | `./senzing.json` | `senzing.json` 数据文件路径。 |
+| `TARGETS_NESTED_PATH` | `./targets.nested.json` | `targets.nested.json` 数据文件路径。 |
+| `MAX_RESULTS` | `5` | 单次查询最多返回的匹配数量。 |
+| `MAX_MESSAGE_CHARS` | `3800` | 单条 Telegram 消息的最大输出字符数；不能超过 Telegram 限制。 |
 
-1. Set `TELEGRAM_BOT_TOKEN` and run the bot once.
-2. Open the bot in Telegram with the admin account.
-3. Send `/start`.
-4. The bot replies with the Telegram numeric user ID.
-5. Stop the bot.
-6. Set `ADMIN_TELEGRAM_USERS` to that ID, for example:
+`approved-users.json` 会包含真实 Telegram 用户 ID，已被 `.gitignore` 忽略，不要提交到仓库。
+
+## 访问控制配置
+
+正常部署时建议选择以下一种模式。
+
+| 模式 | 配置 | 行为 |
+| --- | --- | --- |
+| 公开模式 | `ALLOWED_TELEGRAM_USERS="*"` | 任意 Telegram 用户都可以查询。 |
+| 静态白名单模式 | `ALLOWED_TELEGRAM_USERS="123,456"` | 只有列出的 Telegram 数字用户 ID 可以查询。 |
+| 管理员批准模式 | `ALLOWED_TELEGRAM_USERS=""`，`ADMIN_TELEGRAM_USERS="123"` | 用户发送 `/request` 申请访问，管理员用 `/approve` 批准。 |
+
+补充规则：
+
+- 管理员 ID 始终有查询权限。
+- 运行时批准的用户会写入 `APPROVED_TELEGRAM_USERS_PATH` 指向的 JSON 文件。
+- `ADMIN_TELEGRAM_USERS` 和 `ALLOWED_TELEGRAM_USERS` 都必须使用 Telegram 数字用户 ID，不能使用 `@username`。
+
+## Telegram 配置指引
+
+### 1. 创建机器人
+
+1. 打开 Telegram，搜索官方 `@BotFather`。
+2. 发送 `/newbot`。
+3. 根据提示设置机器人显示名称。
+4. 设置唯一的机器人用户名，用户名通常需要以 `bot` 结尾。
+5. 复制 BotFather 返回的 token，并配置为 `TELEGRAM_BOT_TOKEN`。
+
+请妥善保管 token。任何拿到 token 的人都可以控制这个机器人。
+
+### 2. 配置命令菜单
+
+在 `@BotFather` 中：
+
+1. 发送 `/mybots`。
+2. 选择当前机器人。
+3. 进入 **Edit Bot > Edit Commands**。
+4. 粘贴下面的命令列表：
+
+```text
+start - 显示帮助和访问状态
+request - 向管理员申请访问权限
+check - 查询完整名称的 Debarred 状态
+basic - 显示基础记录信息
+full - 显示完整制裁详情
+approve - 管理员批准 Telegram 用户 ID
+```
+
+配置完成后，用户在机器人聊天窗口输入 `/` 或点击命令菜单时，会看到这些命令。
+
+### 3. 获取管理员 Telegram 数字用户 ID
+
+`ADMIN_TELEGRAM_USERS` 必须配置数字用户 ID。推荐用机器人自举获取：
+
+1. 先配置 `TELEGRAM_BOT_TOKEN`。
+2. 临时启动机器人。
+3. 管理员本人在 Telegram 中打开这个机器人。
+4. 管理员发送 `/start`。
+5. 如果尚未授权，机器人会回复该管理员的 Telegram 数字用户 ID。
+6. 停止机器人，把该 ID 写入 `ADMIN_TELEGRAM_USERS`。
+
+单个管理员：
 
 ```bash
 export ADMIN_TELEGRAM_USERS="123456789"
 ```
 
-For multiple admins, use comma-separated IDs:
+多个管理员：
 
 ```bash
 export ADMIN_TELEGRAM_USERS="123456789,987654321"
 ```
 
-Each admin should open the bot and send `/start` once. Telegram only allows the bot to proactively DM users who have started the bot.
+每个管理员都应该先打开机器人并发送一次 `/start`。Telegram 只允许机器人主动私信已经启动过该机器人的用户，否则管理员可能收不到访问申请通知。
 
-### 4. Run in admin-approved mode
-
-Use this configuration for a private bot where admins approve users from Telegram:
+### 4. 管理员批准模式配置示例
 
 ```bash
 export TELEGRAM_BOT_TOKEN="<bot-token-from-BotFather>"
@@ -106,70 +181,77 @@ export MAX_RESULTS="5"
 export MAX_MESSAGE_CHARS="3800"
 ```
 
-Then start the bot:
+启动：
 
 ```bash
-npm install
 npm run build
 node dist/index.js
 ```
 
-For development, use:
+确认 `APPROVED_TELEGRAM_USERS_PATH` 指向的位置可写。第一次批准用户时，机器人会创建或更新这个文件。
 
-```bash
-npm run dev
+### 5. 用户申请流程
+
+1. 用户在 Telegram 中打开机器人。
+2. 用户发送 `/start`。
+3. 如果用户尚未获批，机器人会显示该用户的 Telegram 数字用户 ID，并提示发送 `/request`。
+4. 用户发送 `/request`。
+5. 机器人把申请详情私信给所有已配置管理员。
+
+### 6. 管理员批准流程
+
+管理员收到申请消息后，可以用任一方式批准：
+
+- 直接回复那条申请消息：`/approve`
+- 主动发送：`/approve <telegram_user_id>`，例如：
+
+```text
+/approve 123456789
 ```
 
-Make sure `APPROVED_TELEGRAM_USERS_PATH` points to a writable location. The bot creates this file on the first approval.
+批准成功后：
 
-### 5. User request and admin approval flow
+1. 机器人会把用户 ID 写入 `approved-users.json`。
+2. 被批准的用户会收到访问已开通的通知。
+3. 用户可以使用 `/check`、`/basic`、`/full`，也可以直接发送完整名称查询。
 
-User flow:
+### 7. 管理员收不到申请通知时的检查项
 
-1. User opens the bot in Telegram.
-2. User sends `/start`.
-3. If not approved, the bot shows the user's numeric Telegram ID.
-4. User sends `/request`.
-5. The bot DMs all configured admins with the request details.
+请确认：
 
-Admin flow:
+- 管理员 ID 已写入 `ADMIN_TELEGRAM_USERS`。
+- `ADMIN_TELEGRAM_USERS` 中是数字用户 ID，不是 `@username`。
+- 管理员已经打开机器人并发送过 `/start`。
+- 机器人进程有权限写入 `approved-users.json`。
+- 机器人使用的是正确的 `TELEGRAM_BOT_TOKEN`。
 
-1. Admin receives an access request message from the bot.
-2. Admin approves in either way:
-   - reply to that request message with `/approve`
-   - send `/approve <telegram_user_id>`, for example `/approve 123456789`
-3. The bot writes the approved ID to `approved-users.json`.
-4. The approved user receives an access-approved message and can use `/check`, `/basic`, `/full`, or plain text name lookups.
+## Telegram 中的使用方式
 
-If admins do not receive request notifications, verify:
+| 操作 | 命令或消息 |
+| --- | --- |
+| 查看帮助和访问状态 | `/start` |
+| 申请访问 | `/request` |
+| 查询完整名称 | `/check YATAI SMART INDUSTRIAL NEW CITY` |
+| 查询基础信息 | `/basic YATAI SMART INDUSTRIAL NEW CITY` |
+| 查询完整制裁详情 | `/full YATAI SMART INDUSTRIAL NEW CITY` |
+| 管理员批准用户 | `/approve 123456789` |
+| 纯文本查询 | `YATAI SMART INDUSTRIAL NEW CITY` |
 
-- the admin ID is listed in `ADMIN_TELEGRAM_USERS`;
-- `ADMIN_TELEGRAM_USERS` contains numeric IDs, not `@username` values;
-- the admin has opened the bot and sent `/start`;
-- the bot process can write `approved-users.json`.
+## 架构说明
 
-### 6. Access mode reference
+V1 版本把文件解析逻辑放在 repository adapter 中，业务查询通过 repository interface 暴露给服务层和 Telegram handler。
 
-Use exactly one of these modes for normal deployments:
+当前实现：
 
-| Mode | Configuration | Behavior |
-| --- | --- | --- |
-| Public | `ALLOWED_TELEGRAM_USERS="*"` | Any Telegram user can query the bot. |
-| Static private | `ALLOWED_TELEGRAM_USERS="123,456"` | Only listed users can query the bot. |
-| Admin-approved | `ALLOWED_TELEGRAM_USERS=""`, `ADMIN_TELEGRAM_USERS="123"` | Users request access with `/request`; admins approve with `/approve`. |
+- `SenzingMemoryRepository` 在启动时读取 `senzing.json`，建立完整名称索引。
+- `TargetsNestedMemoryRepository` 在启动时读取 `targets.nested.json`，并把 OpenSanctions nested sanctions 转换为较小的 `SanctionDetail` DTO。
+- Telegram handler 只依赖领域服务和 repository interface，不直接暴露原始 OpenSanctions nested record。
 
-Admin IDs are always allowed to use lookup commands. Runtime-approved IDs are stored in `approved-users.json`; do not commit that file.
+这样做的目的是让后续替换为 MongoDB、SQLite 或其他持久化 adapter 时，不需要重写 Telegram bot handler。
 
-Reference: Telegram's official BotFather tutorial and bot command-menu documentation are available at <https://core.telegram.org/bots/tutorial> and <https://core.telegram.org/bots/features>.
+V1 有意选择启动时加载本地 JSONL 文件，优点是简单、快速、部署依赖少。如果未来数据量导致启动时间或内存占用过高，可以保留 service 和 handler contract，只替换 repository adapter。
 
-
-## Architecture notes
-
-The V1 code keeps file parsing inside repository adapters and exposes lookup behavior through repository interfaces. `TargetsNestedMemoryRepository` maps raw `targets.nested.json` sanctions into a small domain `SanctionDetail` DTO before formatting, so future MongoDB/lightweight-database adapters do not need to expose raw OpenSanctions nested records to the bot UI.
-
-V1 intentionally loads local JSONL inputs at startup for simple, fast exact-name lookups. If startup time or RSS becomes a problem as data grows, replace the memory repositories with a persistent adapter while preserving the service and bot handler contracts.
-
-## Commands
+## 开发和验证命令
 
 ```bash
 npm install
@@ -179,4 +261,22 @@ npm run build
 npm run dev
 ```
 
-The bot currently uses in-memory DAO adapters. The service depends on repository interfaces so MongoDB or another adapter can be added later without changing bot handlers.
+说明：
+
+- `npm run typecheck`：执行 TypeScript 类型检查。
+- `npm test`：运行 Vitest 测试。
+- `npm run build`：构建生产输出到 `dist/`。
+- `npm run dev`：使用 `tsx` 直接运行源码。
+
+## 安全和部署注意事项
+
+- 不要提交 `TELEGRAM_BOT_TOKEN`。
+- 不要提交 `approved-users.json`。
+- 不要把 `ADMIN_TELEGRAM_USERS` 配成 `@username`；必须使用数字用户 ID。
+- 私有部署建议使用管理员批准模式，而不是公开模式。
+- 如果部署在服务器上，确保数据文件路径和 `APPROVED_TELEGRAM_USERS_PATH` 都是运行用户可读写的正确路径。
+
+## 官方参考
+
+- Telegram BotFather 教程：<https://core.telegram.org/bots/tutorial>
+- Telegram Bot 功能和命令菜单说明：<https://core.telegram.org/bots/features>
