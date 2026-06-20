@@ -54,7 +54,7 @@ chmod 600 .env
 编辑 `.env`：
 
 ```dotenv
-TELEGRAM_BOT_TOKEN=<replace-with-new-token-from-BotFather>
+TELEGRAM_BOT_TOKEN=replace-with-new-token-from-BotFather
 ALLOWED_TELEGRAM_USERS=
 ADMIN_TELEGRAM_USERS=
 APPROVED_TELEGRAM_USERS_PATH=./approved-users.json
@@ -130,7 +130,11 @@ node dist/index.js
 
 注意：每个管理员都应该先在 Telegram 中打开机器人并发送一次 `/start`。Telegram 只允许机器人主动私信已经启动过该机器人的用户，否则管理员可能收不到访问申请通知。
 
-## 5. 在 BotFather 配置命令菜单
+## 5. 查看与配置管理员名单
+
+`ADMIN_TELEGRAM_USERS` 的查看、获取数字 ID、配置多个管理员和排错步骤见 [`admin-telegram-users.md`](admin-telegram-users.md)。
+
+## 6. 在 BotFather 配置命令菜单
 
 在 Telegram 打开官方 `@BotFather`：
 
@@ -150,7 +154,7 @@ approve - 管理员批准 Telegram 用户 ID
 
 配置完成后，用户在机器人聊天窗口输入 `/` 或点击菜单按钮时，会看到这些命令。
 
-## 6. 用户申请访问流程
+## 7. 用户申请访问流程
 
 用户在 Telegram 中打开 `@Debarred_bot` 后：
 
@@ -159,7 +163,7 @@ approve - 管理员批准 Telegram 用户 ID
 3. 用户发送 `/request`。
 4. 机器人会把申请信息私信给所有配置在 `ADMIN_TELEGRAM_USERS` 中的管理员。
 
-## 7. 管理员批准流程
+## 8. 管理员批准流程
 
 管理员收到申请通知后，可以二选一批准。
 
@@ -181,7 +185,7 @@ approve - 管理员批准 Telegram 用户 ID
 - 用户会收到访问已开通的通知。
 - 用户可以开始查询 Debarred 信息。
 
-## 8. 用户查询方式
+## 9. 用户查询方式
 
 用户获批后，可以使用以下方式查询。
 
@@ -199,7 +203,7 @@ approve - 管理员批准 Telegram 用户 ID
 - 不支持部分名称匹配。
 - 只有风险主题包含 `debarment` 的记录会显示为 `Debarred`。
 
-## 9. 其他访问模式
+## 10. 其他访问模式
 
 管理员批准模式是推荐的私有部署方式。如果需要其他模式，可以改环境变量。
 
@@ -231,7 +235,7 @@ ADMIN_TELEGRAM_USERS=123456789
 APPROVED_TELEGRAM_USERS_PATH=./approved-users.json
 ```
 
-## 10. 常见问题排查
+## 11. 常见问题排查
 
 ### Bot 启动时报 `TELEGRAM_BOT_TOKEN is required`
 
@@ -276,7 +280,7 @@ node dist/index.js
 - 运行机器人进程的系统用户是否有写权限。
 - 管理员执行的是 `/approve <telegram_user_id>`，或回复申请消息 `/approve`。
 
-## 11. 安全检查清单
+## 12. 安全检查清单
 
 上线前确认：
 
@@ -289,7 +293,7 @@ node dist/index.js
 - [ ] 数据文件路径正确，机器人进程可读。
 - [ ] `APPROVED_TELEGRAM_USERS_PATH` 所在目录可写。
 
-## 12. 官方参考
+## 13. 官方参考
 
 - Telegram BotFather 教程：<https://core.telegram.org/bots/tutorial>
 - Telegram Bot API：<https://core.telegram.org/bots/api>

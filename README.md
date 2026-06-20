@@ -279,6 +279,7 @@ npm run dev
 ## 独立操作指引
 
 Telegram 创建、token 重新生成、管理员 ID 获取、BotFather 命令菜单和批准流程的完整步骤见 [`docs/telegram-operation-guide.md`](docs/telegram-operation-guide.md)。
+单独的 `ADMIN_TELEGRAM_USERS` 查看与配置步骤见 [`docs/admin-telegram-users.md`](docs/admin-telegram-users.md)。
 
 ## 官方参考
 
