@@ -22,6 +22,7 @@ export interface ApprovedUsersApprover {
 export class BotCommandHandler {
   private readonly approvedUsers?: ApprovedUsersApprover;
   private readonly formatterOptions: FormatterOptions;
+  private readonly pendingQueries = new Map<string, QueryCommand>();
 
   constructor(
     private readonly service: DebarmentService,
@@ -38,6 +39,8 @@ export class BotCommandHandler {
   }
 
   async handleStart(userId: string | number | undefined): Promise<BotReply> {
+    this.clearPendingQuery(userId);
+
     if (!this.accessControl.isAllowed(userId)) {
       if (!this.approvedUsers) return textOnly('Unauthorized.');
       const suffix = userId === undefined
@@ -59,28 +62,36 @@ export class BotCommandHandler {
     if (!message) return textOnly('Send a full name or use /check <name>.');
 
     const parsed = message.startsWith('/') ? parseCommand(message) : undefined;
-    if (parsed?.command === 'request') return this.handleRequest(userId, metadata);
-    if (parsed?.command === 'approve') return this.handleApprove(userId, parsed.argument, metadata.replyToText);
+    if (parsed?.command === 'request') {
+      this.clearPendingQuery(userId);
+      return this.handleRequest(userId, metadata);
+    }
+    if (parsed?.command === 'approve') {
+      this.clearPendingQuery(userId);
+      return this.handleApprove(userId, parsed.argument, metadata.replyToText);
+    }
 
     if (!this.accessControl.isAllowed(userId)) {
       return textOnly(this.approvedUsers ? 'Unauthorized. Send /request to ask an admin for access.' : 'Unauthorized.');
     }
 
+    if (parsed?.command === 'cancel') return this.handleCancel(userId);
+
     if (!message.startsWith('/')) {
-      return formatCheckResult(await this.service.check(message), this.formatterOptions);
+      const pendingCommand = this.consumePendingQuery(userId);
+      if (pendingCommand) return this.runQuery(pendingCommand, message);
+      return this.runQuery('check', message);
     }
 
     if (!parsed) return textOnly(this.approvedUsers ? 'Supported commands: /check <name>, /basic <name>, /full <name>, /request' : 'Supported commands: /check <name>, /basic <name>, /full <name>');
-    if (!parsed.argument) return textOnly(`Usage: /${parsed.command} <name>`);
 
-    switch (parsed.command) {
-      case 'check':
-        return formatCheckResult(await this.service.check(parsed.argument), this.formatterOptions);
-      case 'basic':
-        return formatBasicResults(await this.service.basic(parsed.argument), this.formatterOptions);
-      case 'full':
-        return formatFullResults(await this.service.full(parsed.argument), this.formatterOptions);
+    if (isQueryCommand(parsed.command)) {
+      if (!parsed.argument) return this.waitForQueryArgument(parsed.command, userId);
+      this.clearPendingQuery(userId);
+      return this.runQuery(parsed.command, parsed.argument);
     }
+
+    return textOnly(this.approvedUsers ? 'Supported commands: /check <name>, /basic <name>, /full <name>, /request' : 'Supported commands: /check <name>, /basic <name>, /full <name>');
   }
 
   async handleCallback(callbackData: string, userId: string | number | undefined): Promise<BotReply> {
@@ -134,17 +145,62 @@ export class BotCommandHandler {
       notifications: [{ chatId: result.userId, text: 'Access approved. You can now send a complete name or use /check <name>.' }],
     };
   }
+
+  private waitForQueryArgument(command: QueryCommand, userId: string | number | undefined): BotReply {
+    const key = pendingKey(userId);
+    if (!key) return textOnly(`Usage: /${command} <name>`);
+    this.pendingQueries.set(key, command);
+    return textOnly(`Send the complete name to run /${command}, or /cancel.`);
+  }
+
+  private consumePendingQuery(userId: string | number | undefined): QueryCommand | undefined {
+    const key = pendingKey(userId);
+    if (!key) return undefined;
+    const command = this.pendingQueries.get(key);
+    this.pendingQueries.delete(key);
+    return command;
+  }
+
+  private clearPendingQuery(userId: string | number | undefined): void {
+    const key = pendingKey(userId);
+    if (key) this.pendingQueries.delete(key);
+  }
+
+  private handleCancel(userId: string | number | undefined): BotReply {
+    this.clearPendingQuery(userId);
+    return textOnly('Cancelled.');
+  }
+
+  private async runQuery(command: QueryCommand, name: string): Promise<BotReply> {
+    switch (command) {
+      case 'check':
+        return formatCheckResult(await this.service.check(name), this.formatterOptions);
+      case 'basic':
+        return formatBasicResults(await this.service.basic(name), this.formatterOptions);
+      case 'full':
+        return formatFullResults(await this.service.full(name), this.formatterOptions);
+    }
+  }
 }
 
-type SupportedCommand = 'check' | 'basic' | 'full' | 'request' | 'approve';
+type QueryCommand = 'check' | 'basic' | 'full';
+type SupportedCommand = QueryCommand | 'request' | 'approve' | 'cancel';
 
 function parseCommand(message: string): { command: SupportedCommand; argument: string } | undefined {
-  const match = message.match(/^\/(check|basic|full|request|approve)(?:@\w+)?(?:\s+([\s\S]*))?$/i);
+  const match = message.match(/^\/(check|basic|full|request|approve|cancel)(?:@\w+)?(?:\s+([\s\S]*))?$/i);
   if (!match) return undefined;
   return {
     command: match[1].toLocaleLowerCase('en-US') as SupportedCommand,
     argument: (match[2] ?? '').trim(),
   };
+}
+
+function isQueryCommand(command: SupportedCommand): command is QueryCommand {
+  return command === 'check' || command === 'basic' || command === 'full';
+}
+
+function pendingKey(userId: string | number | undefined): string | undefined {
+  return userId === undefined ? undefined : String(userId);
 }
 
 function formatAccessRequestNotification(requester: TelegramUserProfile, fallbackUserId: string | number): string {

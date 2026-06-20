@@ -6,7 +6,7 @@
 
 - 通过 Telegram 查询完整名称是否命中 Debarred 记录。
 - 支持纯文本查询；发送名称等同于执行 `/check <name>`。
-- 支持 `/check`、`/basic`、`/full` 三类查询命令。
+- 支持 `/check`、`/basic`、`/full` 三类查询命令；菜单选择无参数命令时会等待用户下一条完整名称。
 - 命中后会返回 `/basic` 和 `/full` 内联按钮，便于继续查看详情。
 - 支持三种访问控制模式：公开、静态白名单、管理员批准。
 - 未授权用户可发送 `/request` 申请访问；管理员可用 `/approve` 批准。
@@ -30,6 +30,8 @@
 - 只有包含风险主题 `debarment` 的记录会返回为 `Debarred`。
 - `/basic <name>` 返回基础记录信息。
 - `/full <name>` 返回制裁详情。
+- `/check`、`/basic`、`/full` 后面不带名称时，机器人会进入对应等待输入模式；下一条普通文本会作为完整名称执行并清除等待状态。
+- `/cancel` 可清除等待输入模式。
 - 当消息不是命令时，机器人会把纯文本内容当作 `/check <name>` 处理。
 
 ## 快速开始
@@ -134,6 +136,8 @@ npm run dev
 
 `/request` 和 `/approve` 仍然可以手动输入使用，但不会显示在命令菜单中。未授权用户通过 `/start` 的提示了解如何发送 `/request` 申请访问；管理员仍可手动使用 `/approve` 批准用户。
 
+从菜单选择 `/check`、`/basic` 或 `/full` 时，Telegram 只会发送命令本身；机器人会提示用户继续发送完整名称。发送 `/cancel` 可以取消当前等待输入模式。`/cancel` 不显示在命令菜单中。
+
 如果启动时 Telegram 命令菜单注册失败，机器人会启动失败并退出，便于部署时及时发现 token、网络或 Telegram API 配置问题。
 
 ### 3. 获取管理员 Telegram 数字用户 ID
@@ -227,6 +231,8 @@ node dist/index.js
 | 查询完整名称 | `/check YATAI SMART INDUSTRIAL NEW CITY` |
 | 查询基础信息 | `/basic YATAI SMART INDUSTRIAL NEW CITY` |
 | 查询完整制裁详情 | `/full YATAI SMART INDUSTRIAL NEW CITY` |
+| 菜单查询 | 选择 `/check`、`/basic` 或 `/full` 后，再发送完整名称 |
+| 取消等待输入 | `/cancel` |
 | 管理员批准用户 | `/approve 123456789` |
 | 纯文本查询 | `YATAI SMART INDUSTRIAL NEW CITY` |
 
@@ -271,7 +277,7 @@ npm run dev
 
 ## 独立操作指引
 
-Telegram 创建、token 重新生成、管理员 ID 获取、BotFather 命令菜单和批准流程的完整步骤见 [`docs/telegram-operation-guide.md`](docs/telegram-operation-guide.md)。
+Telegram 创建、token 重新生成、管理员 ID 获取、命令菜单自动注册和批准流程的完整步骤见 [`docs/telegram-operation-guide.md`](docs/telegram-operation-guide.md)。
 单独的 `ADMIN_TELEGRAM_USERS` 查看与配置步骤见 [`docs/admin-telegram-users.md`](docs/admin-telegram-users.md)。
 
 ## 官方参考

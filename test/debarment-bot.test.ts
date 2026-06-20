@@ -426,6 +426,16 @@ describe('access control and pure handlers', () => {
     await expect(handler.handleMessage('YATAI NEW CITY', 123)).resolves.toMatchObject({ text: expect.stringMatching(/^Debarred/) });
   });
 
+  test('start clears a pending query mode', async () => {
+    const handler = new BotCommandHandler(await buildService(), createAccessControl('*'));
+
+    await expect(handler.handleMessage('/full', 123)).resolves.toMatchObject({
+      text: 'Send the complete name to run /full, or /cancel.',
+    });
+    await expect(handler.handleStart(123)).resolves.toMatchObject({ text: expect.stringContaining('Send a complete name') });
+    await expect(handler.handleMessage('YATAI NEW CITY', 123)).resolves.toMatchObject({ text: expect.stringMatching(/^Debarred/) });
+  });
+
   test('callbacks fetch basic/full by record id', async () => {
     const handler = new BotCommandHandler(await buildService(), createAccessControl('*'));
 

@@ -145,6 +145,8 @@ node dist/index.js
 
 `/request` 和 `/approve` 不显示在命令菜单中，但命令仍然可用。未授权用户通过 `/start` 的提示知道可以发送 `/request` 申请访问；管理员收到申请后仍然可以手动发送 `/approve <telegram_user_id>`，或回复申请消息 `/approve`。
 
+从菜单选择 `/check`、`/basic` 或 `/full` 时，Telegram 只会发送命令本身；机器人会提示用户继续发送完整名称。下一条普通文本会按所选模式查询并清除等待状态。如果用户在输入名称前又选择另一个查询命令，新命令会覆盖旧等待模式。发送 `/cancel` 可以取消当前等待输入模式。`/cancel` 不显示在命令菜单中。
+
 如果启动时命令菜单注册失败，机器人会启动失败并退出。此时优先检查 `TELEGRAM_BOT_TOKEN`、网络连接和 Telegram API 可用性。
 
 ## 7. 用户申请访问流程
@@ -188,6 +190,8 @@ node dist/index.js
 | 查询完整名称 | `/check YATAI SMART INDUSTRIAL NEW CITY` |
 | 查询基础信息 | `/basic YATAI SMART INDUSTRIAL NEW CITY` |
 | 查询完整制裁详情 | `/full YATAI SMART INDUSTRIAL NEW CITY` |
+| 菜单查询 | 选择 `/check`、`/basic` 或 `/full` 后，再发送完整名称 |
+| 取消等待输入 | `/cancel` |
 | 纯文本查询 | `YATAI SMART INDUSTRIAL NEW CITY` |
 
 查询规则：
@@ -195,6 +199,7 @@ node dist/index.js
 - 必须输入完整名称。
 - 不支持部分名称匹配。
 - 只有风险主题包含 `debarment` 的记录会显示为 `Debarred`。
+- 如果没有等待输入模式，普通文本会按 `/check <name>` 查询。
 
 ## 10. 其他访问模式
 
