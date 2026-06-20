@@ -1,7 +1,7 @@
 import { Telegraf } from 'telegraf';
 import type { Context, NarrowedContext } from 'telegraf';
 import type { Update } from 'telegraf/types';
-import type { BotCommandHandler } from './handlers.js';
+import type { BotCommandHandler, BotMessageMetadata } from './handlers.js';
 import type { BotReply } from '../domain/types.js';
 
 export function createBot(token: string, handler: BotCommandHandler): Telegraf<Context> {
@@ -11,12 +11,12 @@ export function createBot(token: string, handler: BotCommandHandler): Telegraf<C
     await replyToContext(ctx, await handler.handleStart(ctx.from?.id));
   });
 
-  bot.command(['check', 'basic', 'full'], async (ctx) => {
-    await replyToContext(ctx, await handler.handleMessage(ctx.message.text, ctx.from?.id));
+  bot.command(['check', 'basic', 'full', 'request', 'approve'], async (ctx) => {
+    await replyToContext(ctx, await handler.handleMessage(ctx.message.text, ctx.from?.id, metadataFromContext(ctx)));
   });
 
   bot.on('text', async (ctx) => {
-    await replyToContext(ctx, await handler.handleMessage(ctx.message.text, ctx.from?.id));
+    await replyToContext(ctx, await handler.handleMessage(ctx.message.text, ctx.from?.id, metadataFromContext(ctx)));
   });
 
   bot.action(/^(basic|full):(.+)$/u, async (ctx) => {
@@ -26,6 +26,23 @@ export function createBot(token: string, handler: BotCommandHandler): Telegraf<C
   });
 
   return bot;
+}
+
+function metadataFromContext(ctx: Context | NarrowedContext<Context, Update>): BotMessageMetadata {
+  const from = ctx.from
+    ? {
+        id: ctx.from.id,
+        username: ctx.from.username,
+        firstName: ctx.from.first_name,
+        lastName: ctx.from.last_name,
+      }
+    : undefined;
+
+  const message = 'message' in ctx && ctx.message && 'reply_to_message' in ctx.message ? ctx.message : undefined;
+  const replyToMessage = message?.reply_to_message;
+  const replyToText = replyToMessage && 'text' in replyToMessage ? replyToMessage.text : undefined;
+
+  return { from, replyToText };
 }
 
 async function replyToContext(ctx: Context | NarrowedContext<Context, Update>, reply: BotReply): Promise<void> {
@@ -40,4 +57,12 @@ async function replyToContext(ctx: Context | NarrowedContext<Context, Update>, r
     : undefined;
 
   await ctx.reply(reply.text, extra);
+
+  for (const notification of reply.notifications ?? []) {
+    try {
+      await ctx.telegram.sendMessage(notification.chatId, notification.text);
+    } catch (error: unknown) {
+      console.warn(`Failed to send Telegram notification to ${notification.chatId}:`, error);
+    }
+  }
 }
