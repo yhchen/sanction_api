@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, test } from 'vitest';
+import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { normalizeName } from '../src/domain/normalize.js';
+import { ApprovedUsersRepository } from '../src/data/approvedUsersRepository.js';
 import { SenzingMemoryRepository } from '../src/data/senzingMemoryRepository.js';
 import { TargetsNestedMemoryRepository } from '../src/data/targetsNestedMemoryRepository.js';
 import { DebarmentService } from '../src/domain/debarmentService.js';
@@ -40,6 +43,52 @@ describe('normalized exact matching', () => {
     const service = await buildService();
 
     await expect(service.check('HARMLESS SHIPPING LTD')).resolves.toMatchObject({ found: false, matches: [] });
+  });
+});
+
+
+describe('approved users repository', () => {
+  async function tempApprovedUsersPath(): Promise<string> {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'approved-users-'));
+    return path.join(dir, 'approved-users.json');
+  }
+
+  test('treats a missing approved users file as empty and creates it on approval', async () => {
+    const filePath = await tempApprovedUsersPath();
+    const repo = await ApprovedUsersRepository.fromFile(filePath);
+
+    expect(repo.has('123')).toBe(false);
+    await expect(repo.approve('123')).resolves.toEqual({ userId: '123', alreadyApproved: false });
+    expect(repo.has('123')).toBe(true);
+    await expect(fs.readFile(filePath, 'utf8')).resolves.toBe(`{
+  "approvedUserIds": [
+    "123"
+  ]
+}\n`);
+  });
+
+  test('loads existing approved users and keeps approvals idempotent', async () => {
+    const filePath = await tempApprovedUsersPath();
+    await fs.writeFile(filePath, '{"approvedUserIds":["456"]}\n', 'utf8');
+    const repo = await ApprovedUsersRepository.fromFile(filePath);
+
+    expect(repo.has('456')).toBe(true);
+    await expect(repo.approve('456')).resolves.toEqual({ userId: '456', alreadyApproved: true });
+    await expect(fs.readFile(filePath, 'utf8')).resolves.toBe(`{
+  "approvedUserIds": [
+    "456"
+  ]
+}\n`);
+  });
+
+  test('rejects corrupt or invalid approved users files', async () => {
+    const corruptPath = await tempApprovedUsersPath();
+    await fs.writeFile(corruptPath, '{broken', 'utf8');
+    await expect(ApprovedUsersRepository.fromFile(corruptPath)).rejects.toThrow(/Invalid approved users JSON/);
+
+    const invalidShapePath = await tempApprovedUsersPath();
+    await fs.writeFile(invalidShapePath, '{"approvedUserIds":[123]}\n', 'utf8');
+    await expect(ApprovedUsersRepository.fromFile(invalidShapePath)).rejects.toThrow(/approvedUserIds/);
   });
 });
 
@@ -118,11 +167,26 @@ describe('formatters', () => {
 });
 
 describe('access control and pure handlers', () => {
-  test('supports whitelist and public wildcard', () => {
+  test('supports public wildcard, static whitelist, admins, and dynamic approvals', () => {
+    const approvedUsers = { has: (userId: string | number | undefined | null) => String(userId) === '789' };
+
     expect(createAccessControl('*').isAllowed(undefined)).toBe(true);
     expect(createAccessControl('123, 456').isAllowed(123)).toBe(true);
     expect(createAccessControl('123, 456').isAllowed('789')).toBe(false);
     expect(createAccessControl('').isAllowed(123)).toBe(false);
+
+    const accessControl = createAccessControl('123', {
+      adminTelegramUsers: '456',
+      approvedUsers,
+    });
+
+    expect(accessControl.isAllowed(123)).toBe(true);
+    expect(accessControl.isAllowed(456)).toBe(true);
+    expect(accessControl.isAllowed(789)).toBe(true);
+    expect(accessControl.isAllowed(999)).toBe(false);
+    expect(accessControl.isAdmin(456)).toBe(true);
+    expect(accessControl.isAdmin(123)).toBe(false);
+    expect([...accessControl.adminUserIds]).toEqual(['456']);
   });
 
   test('plain text behaves as check and positive check includes action buttons', async () => {
@@ -225,5 +289,27 @@ describe('config', () => {
         { requireToken: true },
       ),
     ).toThrow(/MAX_MESSAGE_CHARS/);
+  });
+
+
+  test('loads admin approval config', () => {
+    expect(
+      loadConfig(
+        {
+          TELEGRAM_BOT_TOKEN: 'token',
+          ADMIN_TELEGRAM_USERS: '111, 222',
+          APPROVED_TELEGRAM_USERS_PATH: './runtime-approved.json',
+        },
+        { requireToken: true },
+      ),
+    ).toMatchObject({
+      adminTelegramUsers: '111, 222',
+      approvedTelegramUsersPath: './runtime-approved.json',
+    });
+
+    expect(loadConfig({ TELEGRAM_BOT_TOKEN: 'token' }, { requireToken: true })).toMatchObject({
+      adminTelegramUsers: '',
+      approvedTelegramUsersPath: './approved-users.json',
+    });
   });
 });
