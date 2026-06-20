@@ -22,6 +22,46 @@ async function buildService(maxResults = 5) {
   return new DebarmentService(senzing, targets, { maxResults });
 }
 
+class InMemoryApprovedUsers {
+  private readonly userIds = new Set<string>();
+
+  constructor(initialUserIds: string[] = []) {
+    for (const userId of initialUserIds) this.userIds.add(userId);
+  }
+
+  has(userId: string | number | undefined | null): boolean {
+    if (userId === undefined || userId === null) return false;
+    return this.userIds.has(String(userId));
+  }
+
+  async approve(userId: string | number): Promise<{ userId: string; alreadyApproved: boolean }> {
+    const normalizedUserId = String(userId).trim();
+    const alreadyApproved = this.userIds.has(normalizedUserId);
+    this.userIds.add(normalizedUserId);
+    return { userId: normalizedUserId, alreadyApproved };
+  }
+}
+
+interface ApprovalAccessControlOptions {
+  adminTelegramUsers?: string;
+  approvedUsers?: InMemoryApprovedUsers;
+}
+
+function createApprovalAccessControl(whitelist: string, options: ApprovalAccessControlOptions) {
+  return (createAccessControl as unknown as (whitelist: string, options: ApprovalAccessControlOptions) => ReturnType<typeof createAccessControl>)(
+    whitelist,
+    options,
+  );
+}
+
+function createApprovalHandler(
+  service: DebarmentService,
+  accessControl: ReturnType<typeof createAccessControl>,
+  approvedUsers: InMemoryApprovedUsers,
+): BotCommandHandler {
+  return new BotCommandHandler(service, accessControl, approvedUsers);
+}
+
 describe('normalized exact matching', () => {
   test('normalizes case, punctuation, unicode width and whitespace', () => {
     expect(normalizeName('  MYANMAR YATAI INTERNATIONAL HOLDING GROUP CO., LTD.  ')).toBe(
@@ -195,6 +235,114 @@ describe('access control and pure handlers', () => {
 
     expect(reply.text.startsWith('Debarred')).toBe(true);
     expect(reply.buttons.flat()).toHaveLength(2);
+  });
+
+  test('unauthorized start shows request instructions and user id', async () => {
+    const approvedUsers = new InMemoryApprovedUsers();
+    const handler = createApprovalHandler(
+      await buildService(),
+      createApprovalAccessControl('', { adminTelegramUsers: '456', approvedUsers }),
+      approvedUsers,
+    );
+
+    await expect(handler.handleStart(123)).resolves.toMatchObject({
+      text: 'Unauthorized. Your Telegram user id is 123. Send /request to ask an admin for access.',
+    });
+  });
+
+  test('request notifies configured admins with requester details', async () => {
+    const approvedUsers = new InMemoryApprovedUsers();
+    const handler = createApprovalHandler(
+      await buildService(),
+      createApprovalAccessControl('', { adminTelegramUsers: '456, 789', approvedUsers }),
+      approvedUsers,
+    );
+
+    const reply = await handler.handleMessage('/request', 123, {
+      from: { id: 123, username: 'alice', firstName: 'Alice', lastName: 'Example' },
+    });
+
+    expect(reply.text).toBe('Access request received. Admins have been notified if reachable.');
+    expect(reply.notifications).toEqual([
+      {
+        chatId: '456',
+        text: 'Access request\nUser ID: 123\nUsername: @alice\nName: Alice Example\n\nReply to this message with /approve or send /approve 123.',
+      },
+      {
+        chatId: '789',
+        text: 'Access request\nUser ID: 123\nUsername: @alice\nName: Alice Example\n\nReply to this message with /approve or send /approve 123.',
+      },
+    ]);
+  });
+
+  test('request reports when no admins are configured', async () => {
+    const approvedUsers = new InMemoryApprovedUsers();
+    const handler = createApprovalHandler(
+      await buildService(),
+      createApprovalAccessControl('', { approvedUsers }),
+      approvedUsers,
+    );
+
+    await expect(handler.handleMessage('/request', 123)).resolves.toMatchObject({
+      text: 'No admins are configured. Ask the bot operator to set ADMIN_TELEGRAM_USERS.',
+    });
+  });
+
+  test('admin can approve by id and approved user is notified', async () => {
+    const approvedUsers = new InMemoryApprovedUsers();
+    const accessControl = createApprovalAccessControl('', { adminTelegramUsers: '456', approvedUsers });
+    const handler = createApprovalHandler(await buildService(), accessControl, approvedUsers);
+
+    const reply = await handler.handleMessage('/approve 123', 456);
+
+    expect(reply).toMatchObject({
+      text: 'Approved user 123.',
+      notifications: [{ chatId: '123', text: 'Access approved. You can now send a complete name or use /check <name>.' }],
+    });
+    expect(accessControl.isAllowed(123)).toBe(true);
+  });
+
+  test('admin approve is idempotent and rejects invalid input', async () => {
+    const approvedUsers = new InMemoryApprovedUsers(['123']);
+    const handler = createApprovalHandler(
+      await buildService(),
+      createApprovalAccessControl('', { adminTelegramUsers: '456', approvedUsers }),
+      approvedUsers,
+    );
+
+    await expect(handler.handleMessage('/approve 123', 456)).resolves.toMatchObject({ text: 'User 123 is already approved.' });
+    await expect(handler.handleMessage('/approve abc', 456)).resolves.toMatchObject({ text: 'Invalid Telegram user id.' });
+    await expect(handler.handleMessage('/approve', 456)).resolves.toMatchObject({
+      text: 'Usage: /approve <telegram_user_id> or reply /approve to an access request.',
+    });
+  });
+
+  test('non-admin cannot approve users', async () => {
+    const approvedUsers = new InMemoryApprovedUsers();
+    const handler = createApprovalHandler(
+      await buildService(),
+      createApprovalAccessControl('', { adminTelegramUsers: '456', approvedUsers }),
+      approvedUsers,
+    );
+
+    await expect(handler.handleMessage('/approve 123', 999)).resolves.toMatchObject({ text: 'Unauthorized.' });
+    expect(approvedUsers.has('123')).toBe(false);
+  });
+
+  test('admin can approve by replying to a request notification', async () => {
+    const approvedUsers = new InMemoryApprovedUsers();
+    const handler = createApprovalHandler(
+      await buildService(),
+      createApprovalAccessControl('', { adminTelegramUsers: '456', approvedUsers }),
+      approvedUsers,
+    );
+
+    await expect(
+      handler.handleMessage('/approve', 456, {
+        replyToText: 'Access request\nUser ID: 123\nUsername: @alice\nName: Alice Example\n\nReply to this message with /approve or send /approve 123.',
+      }),
+    ).resolves.toMatchObject({ text: 'Approved user 123.' });
+    expect(approvedUsers.has('123')).toBe(true);
   });
 
   test('start command is also protected by whitelist', async () => {
