@@ -1,5 +1,5 @@
 import { createAccessControl } from './bot/accessControl.js';
-import { createBot } from './bot/createBot.js';
+import { createBot, startBot } from './bot/createBot.js';
 import { BotCommandHandler } from './bot/handlers.js';
 import { loadConfig } from './config.js';
 import { ApprovedUsersRepository } from './data/approvedUsersRepository.js';
@@ -31,7 +31,7 @@ async function main(): Promise<void> {
   });
   const bot = createBot(config.telegramBotToken, handler);
 
-  await bot.launch();
+  await startBot(bot);
   console.info('Telegram bot started.');
 
   process.once('SIGINT', () => bot.stop('SIGINT'));

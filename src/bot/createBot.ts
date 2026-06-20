@@ -1,8 +1,25 @@
 import { Telegraf } from 'telegraf';
 import type { Context, NarrowedContext } from 'telegraf';
-import type { Update } from 'telegraf/types';
+import type { BotCommand, Update } from 'telegraf/types';
 import type { BotCommandHandler, BotMessageMetadata } from './handlers.js';
 import type { BotReply } from '../domain/types.js';
+
+export const VISIBLE_BOT_COMMANDS: BotCommand[] = [
+  { command: 'start', description: '显示帮助和访问状态' },
+  { command: 'check', description: '查询完整名称的 Debarred 状态' },
+  { command: 'basic', description: '显示基础记录信息' },
+  { command: 'full', description: '显示完整制裁详情' },
+];
+
+export interface BotCommandRegistrar {
+  telegram: {
+    setMyCommands(commands: BotCommand[]): Promise<unknown>;
+  };
+}
+
+export interface LaunchableBot extends BotCommandRegistrar {
+  launch(): Promise<unknown>;
+}
 
 export function createBot(token: string, handler: BotCommandHandler): Telegraf<Context> {
   const bot = new Telegraf(token);
@@ -26,6 +43,15 @@ export function createBot(token: string, handler: BotCommandHandler): Telegraf<C
   });
 
   return bot;
+}
+
+export async function registerBotCommands(bot: BotCommandRegistrar): Promise<void> {
+  await bot.telegram.setMyCommands(VISIBLE_BOT_COMMANDS);
+}
+
+export async function startBot(bot: LaunchableBot): Promise<void> {
+  await registerBotCommands(bot);
+  await bot.launch();
 }
 
 function metadataFromContext(ctx: Context | NarrowedContext<Context, Update>): BotMessageMetadata {

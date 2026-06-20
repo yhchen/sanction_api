@@ -134,25 +134,18 @@ node dist/index.js
 
 `ADMIN_TELEGRAM_USERS` 的查看、获取数字 ID、配置多个管理员和排错步骤见 [`admin-telegram-users.md`](admin-telegram-users.md)。
 
-## 6. 在 BotFather 配置命令菜单
+## 6. 命令菜单自动注册
 
-在 Telegram 打开官方 `@BotFather`：
+机器人启动时会自动向 Telegram 注册命令菜单，不需要在 `@BotFather` 中手工配置。菜单中只显示以下快速指令：
 
-1. 发送 `/mybots`。
-2. 选择 `Debarred_bot`。
-3. 进入 **Edit Bot > Edit Commands**。
-4. 粘贴以下命令列表：
+- `/start` - 显示帮助和访问状态
+- `/check` - 查询完整名称的 Debarred 状态
+- `/basic` - 显示基础记录信息
+- `/full` - 显示完整制裁详情
 
-```text
-start - 显示帮助和访问状态
-request - 向管理员申请访问权限
-check - 查询完整名称的 Debarred 状态
-basic - 显示基础记录信息
-full - 显示完整制裁详情
-approve - 管理员批准 Telegram 用户 ID
-```
+`/request` 和 `/approve` 不显示在命令菜单中，但命令仍然可用。未授权用户通过 `/start` 的提示知道可以发送 `/request` 申请访问；管理员收到申请后仍然可以手动发送 `/approve <telegram_user_id>`，或回复申请消息 `/approve`。
 
-配置完成后，用户在机器人聊天窗口输入 `/` 或点击菜单按钮时，会看到这些命令。
+如果启动时命令菜单注册失败，机器人会启动失败并退出。此时优先检查 `TELEGRAM_BOT_TOKEN`、网络连接和 Telegram API 可用性。
 
 ## 7. 用户申请访问流程
 
