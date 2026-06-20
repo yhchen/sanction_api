@@ -276,6 +276,10 @@ npm run dev
 - 私有部署建议使用管理员批准模式，而不是公开模式。
 - 如果部署在服务器上，确保数据文件路径和 `APPROVED_TELEGRAM_USERS_PATH` 都是运行用户可读写的正确路径。
 
+## 独立操作指引
+
+Telegram 创建、token 重新生成、管理员 ID 获取、BotFather 命令菜单和批准流程的完整步骤见 [`docs/telegram-operation-guide.md`](docs/telegram-operation-guide.md)。
+
 ## 官方参考
 
 - Telegram BotFather 教程：<https://core.telegram.org/bots/tutorial>
