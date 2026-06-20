@@ -136,7 +136,13 @@ export interface ReplyButton {
   callbackData: string;
 }
 
+export interface BotNotification {
+  chatId: string;
+  text: string;
+}
+
 export interface BotReply {
   text: string;
   buttons: ReplyButton[][];
+  notifications?: BotNotification[];
 }

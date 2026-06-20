@@ -3,6 +3,8 @@ export const TELEGRAM_MAX_MESSAGE_CHARS = 4096;
 export interface AppConfig {
   telegramBotToken: string;
   allowedTelegramUsers: string;
+  adminTelegramUsers: string;
+  approvedTelegramUsersPath: string;
   senzingPath: string;
   targetsNestedPath: string;
   maxResults: number;
@@ -26,6 +28,8 @@ export function loadConfig(
   return {
     telegramBotToken,
     allowedTelegramUsers: env.ALLOWED_TELEGRAM_USERS?.trim() ?? '',
+    adminTelegramUsers: env.ADMIN_TELEGRAM_USERS?.trim() ?? '',
+    approvedTelegramUsersPath: env.APPROVED_TELEGRAM_USERS_PATH?.trim() || './approved-users.json',
     senzingPath: env.SENZING_PATH?.trim() || './senzing.json',
     targetsNestedPath: env.TARGETS_NESTED_PATH?.trim() || './targets.nested.json',
     maxResults: positiveInteger(env.MAX_RESULTS, 5, 'MAX_RESULTS'),
