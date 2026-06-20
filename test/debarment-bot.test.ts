@@ -372,13 +372,58 @@ describe('access control and pure handlers', () => {
     await expect(privateHandler.handleStart(123)).resolves.toMatchObject({ text: 'Unauthorized.' });
   });
 
-  test('direct commands support check/basic/full and missing args', async () => {
+  test('direct commands support check/basic/full with arguments', async () => {
     const handler = new BotCommandHandler(await buildService(), createAccessControl('*'));
 
     await expect(handler.handleMessage('/check YATAI NEW CITY', 123)).resolves.toMatchObject({ text: expect.stringMatching(/^Debarred/) });
     await expect(handler.handleMessage('/basic YATAI NEW CITY', 123)).resolves.toMatchObject({ text: expect.stringContaining('Basic Information') });
     await expect(handler.handleMessage('/full YATAI NEW CITY', 123)).resolves.toMatchObject({ text: expect.stringContaining('Sanctions Details') });
-    await expect(handler.handleMessage('/check', 123)).resolves.toMatchObject({ text: 'Usage: /check <name>' });
+  });
+
+  test('no-argument check waits for the next text and then clears', async () => {
+    const handler = new BotCommandHandler(await buildService(), createAccessControl('*'));
+
+    await expect(handler.handleMessage('/check', 123)).resolves.toMatchObject({
+      text: 'Send the complete name to run /check, or /cancel.',
+    });
+    await expect(handler.handleMessage('YATAI NEW CITY', 123)).resolves.toMatchObject({ text: expect.stringMatching(/^Debarred/) });
+    await expect(handler.handleMessage('YATAI NEW CITY', 123)).resolves.toMatchObject({ text: expect.stringMatching(/^Debarred/) });
+  });
+
+  test('no-argument basic and full wait for their own next text', async () => {
+    const handler = new BotCommandHandler(await buildService(), createAccessControl('*'));
+
+    await expect(handler.handleMessage('/basic', 123)).resolves.toMatchObject({
+      text: 'Send the complete name to run /basic, or /cancel.',
+    });
+    await expect(handler.handleMessage('YATAI NEW CITY', 123)).resolves.toMatchObject({ text: expect.stringContaining('Basic Information') });
+
+    await expect(handler.handleMessage('/full', 123)).resolves.toMatchObject({
+      text: 'Send the complete name to run /full, or /cancel.',
+    });
+    await expect(handler.handleMessage('YATAI NEW CITY', 123)).resolves.toMatchObject({ text: expect.stringContaining('Sanctions Details') });
+  });
+
+  test('new no-argument query commands replace the pending mode', async () => {
+    const handler = new BotCommandHandler(await buildService(), createAccessControl('*'));
+
+    await expect(handler.handleMessage('/basic', 123)).resolves.toMatchObject({
+      text: 'Send the complete name to run /basic, or /cancel.',
+    });
+    await expect(handler.handleMessage('/full', 123)).resolves.toMatchObject({
+      text: 'Send the complete name to run /full, or /cancel.',
+    });
+    await expect(handler.handleMessage('YATAI NEW CITY', 123)).resolves.toMatchObject({ text: expect.stringContaining('Sanctions Details') });
+  });
+
+  test('cancel clears a pending query mode', async () => {
+    const handler = new BotCommandHandler(await buildService(), createAccessControl('*'));
+
+    await expect(handler.handleMessage('/full', 123)).resolves.toMatchObject({
+      text: 'Send the complete name to run /full, or /cancel.',
+    });
+    await expect(handler.handleMessage('/cancel', 123)).resolves.toMatchObject({ text: 'Cancelled.' });
+    await expect(handler.handleMessage('YATAI NEW CITY', 123)).resolves.toMatchObject({ text: expect.stringMatching(/^Debarred/) });
   });
 
   test('callbacks fetch basic/full by record id', async () => {
