@@ -123,25 +123,18 @@ npm run dev
 
 请妥善保管 token。任何拿到 token 的人都可以控制这个机器人。
 
-### 2. 配置命令菜单
+### 2. 命令菜单自动注册
 
-在 `@BotFather` 中：
+机器人启动时会自动向 Telegram 注册命令菜单，不需要再到 `@BotFather` 手工配置。菜单中只显示面向查询和入口的快速指令：
 
-1. 发送 `/mybots`。
-2. 选择当前机器人。
-3. 进入 **Edit Bot > Edit Commands**。
-4. 粘贴下面的命令列表：
+- `/start` - 显示帮助和访问状态
+- `/check` - 查询完整名称的 Debarred 状态
+- `/basic` - 显示基础记录信息
+- `/full` - 显示完整制裁详情
 
-```text
-start - 显示帮助和访问状态
-request - 向管理员申请访问权限
-check - 查询完整名称的 Debarred 状态
-basic - 显示基础记录信息
-full - 显示完整制裁详情
-approve - 管理员批准 Telegram 用户 ID
-```
+`/request` 和 `/approve` 仍然可以手动输入使用，但不会显示在命令菜单中。未授权用户通过 `/start` 的提示了解如何发送 `/request` 申请访问；管理员仍可手动使用 `/approve` 批准用户。
 
-配置完成后，用户在机器人聊天窗口输入 `/` 或点击命令菜单时，会看到这些命令。
+如果启动时 Telegram 命令菜单注册失败，机器人会启动失败并退出，便于部署时及时发现 token、网络或 Telegram API 配置问题。
 
 ### 3. 获取管理员 Telegram 数字用户 ID
 
