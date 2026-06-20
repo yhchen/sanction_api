@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Telegram bot for file-backed Debarred lookups over OpenSanctions-derived data.",
   "scripts": {
-    "dev": "tsx src/index.ts",
+    "dev": "tsx --env-file=.env.develop src/index.ts",
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
