@@ -23,14 +23,22 @@ Set environment variables before running:
 
 ```bash
 export TELEGRAM_BOT_TOKEN="<bot-token>"
-export ALLOWED_TELEGRAM_USERS="*" # or comma-separated Telegram numeric user ids, e.g. "123,456"
+export ALLOWED_TELEGRAM_USERS="" # "*" makes the bot public; comma-separated IDs are statically allowed
+export ADMIN_TELEGRAM_USERS="123456789" # comma-separated Telegram numeric user ids that can approve access
+export APPROVED_TELEGRAM_USERS_PATH="./approved-users.json"
 export SENZING_PATH="./senzing.json"
 export TARGETS_NESTED_PATH="./targets.nested.json"
 export MAX_RESULTS="5"
 export MAX_MESSAGE_CHARS="3800"
 ```
 
-`ALLOWED_TELEGRAM_USERS=*` makes the bot public. An empty whitelist denies users.
+Access control supports three modes:
+
+- Public: set `ALLOWED_TELEGRAM_USERS=*`.
+- Static private: set `ALLOWED_TELEGRAM_USERS="123,456"`.
+- Admin-approved: set `ADMIN_TELEGRAM_USERS="123"` and keep `APPROVED_TELEGRAM_USERS_PATH` pointed at a writable local JSON file. Unauthorized users can send `/request`; admins can approve with `/approve <telegram_user_id>` or by replying `/approve` to the bot's request notification.
+
+The runtime `approved-users.json` file contains real Telegram user IDs and is ignored by git.
 
 
 ## Architecture notes

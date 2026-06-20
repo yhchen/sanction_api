@@ -9,3 +9,6 @@ coverage/
 senzing.json
 targets.nested.json
 entities.ftm.json
+
+# Runtime Telegram access state
+approved-users.json
