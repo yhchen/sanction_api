@@ -4,7 +4,7 @@ import type { AccessControl } from './accessControl.js';
 import { formatBasicResults, formatCheckResult, formatFullResults, type FormatterOptions } from './formatters.js';
 
 export interface TelegramUserProfile {
-  id?: string | number;
+  id: string | number;
   username?: string;
   firstName?: string;
   lastName?: string;
@@ -15,21 +15,31 @@ export interface BotMessageMetadata {
   replyToText?: string;
 }
 
-export interface ApprovedUsersWriter {
+export interface ApprovedUsersApprover {
   approve(userId: string | number): Promise<{ userId: string; alreadyApproved: boolean }>;
 }
 
 export class BotCommandHandler {
+  private readonly approvedUsers?: ApprovedUsersApprover;
+  private readonly formatterOptions: FormatterOptions;
+
   constructor(
     private readonly service: DebarmentService,
     private readonly accessControl: AccessControl,
-    private readonly approvedUsers?: ApprovedUsersWriter,
-    private readonly formatterOptions: FormatterOptions = {},
-  ) {}
+    approvedUsersOrFormatterOptions: ApprovedUsersApprover | FormatterOptions = {},
+    formatterOptions: FormatterOptions = {},
+  ) {
+    if (isApprovedUsersApprover(approvedUsersOrFormatterOptions)) {
+      this.approvedUsers = approvedUsersOrFormatterOptions;
+      this.formatterOptions = formatterOptions;
+    } else {
+      this.formatterOptions = approvedUsersOrFormatterOptions;
+    }
+  }
 
   async handleStart(userId: string | number | undefined): Promise<BotReply> {
     if (!this.accessControl.isAllowed(userId)) {
-      if (!this.isApprovalFlowEnabled()) return textOnly('Unauthorized.');
+      if (!this.approvedUsers) return textOnly('Unauthorized.');
       const suffix = userId === undefined
         ? 'Send /request to ask an admin for access.'
         : `Your Telegram user id is ${userId}. Send /request to ask an admin for access.`;
@@ -53,14 +63,14 @@ export class BotCommandHandler {
     if (parsed?.command === 'approve') return this.handleApprove(userId, parsed.argument, metadata.replyToText);
 
     if (!this.accessControl.isAllowed(userId)) {
-      return textOnly(this.isApprovalFlowEnabled() ? 'Unauthorized. Send /request to ask an admin for access.' : 'Unauthorized.');
+      return textOnly(this.approvedUsers ? 'Unauthorized. Send /request to ask an admin for access.' : 'Unauthorized.');
     }
 
     if (!message.startsWith('/')) {
       return formatCheckResult(await this.service.check(message), this.formatterOptions);
     }
 
-    if (!parsed) return textOnly('Supported commands: /check <name>, /basic <name>, /full <name>, /request');
+    if (!parsed) return textOnly(this.approvedUsers ? 'Supported commands: /check <name>, /basic <name>, /full <name>, /request' : 'Supported commands: /check <name>, /basic <name>, /full <name>');
     if (!parsed.argument) return textOnly(`Usage: /${parsed.command} <name>`);
 
     switch (parsed.command) {
@@ -109,11 +119,11 @@ export class BotCommandHandler {
     replyToText: string | undefined,
   ): Promise<BotReply> {
     if (!this.accessControl.isAdmin(userId)) return textOnly('Unauthorized.');
+    if (!this.approvedUsers) return textOnly('Approval storage is not configured.');
 
     const targetUserId = argument || extractRequesterId(replyToText);
     if (!targetUserId) return textOnly('Usage: /approve <telegram_user_id> or reply /approve to an access request.');
     if (!/^\d+$/u.test(targetUserId)) return textOnly('Invalid Telegram user id.');
-    if (!this.approvedUsers) return textOnly('Approval storage is not configured.');
 
     const result = await this.approvedUsers.approve(targetUserId);
     if (result.alreadyApproved) return textOnly(`User ${result.userId} is already approved.`);
@@ -124,17 +134,15 @@ export class BotCommandHandler {
       notifications: [{ chatId: result.userId, text: 'Access approved. You can now send a complete name or use /check <name>.' }],
     };
   }
-
-  private isApprovalFlowEnabled(): boolean {
-    return this.approvedUsers !== undefined || this.accessControl.adminUserIds.size > 0;
-  }
 }
 
-function parseCommand(message: string): { command: 'check' | 'basic' | 'full' | 'request' | 'approve'; argument: string } | undefined {
+type SupportedCommand = 'check' | 'basic' | 'full' | 'request' | 'approve';
+
+function parseCommand(message: string): { command: SupportedCommand; argument: string } | undefined {
   const match = message.match(/^\/(check|basic|full|request|approve)(?:@\w+)?(?:\s+([\s\S]*))?$/i);
   if (!match) return undefined;
   return {
-    command: match[1].toLocaleLowerCase('en-US') as 'check' | 'basic' | 'full' | 'request' | 'approve',
+    command: match[1].toLocaleLowerCase('en-US') as SupportedCommand,
     argument: (match[2] ?? '').trim(),
   };
 }
@@ -150,6 +158,10 @@ function formatAccessRequestNotification(requester: TelegramUserProfile, fallbac
 function extractRequesterId(replyToText: string | undefined): string {
   const match = replyToText?.match(/^User ID:\s*(\d+)$/im);
   return match?.[1] ?? '';
+}
+
+function isApprovedUsersApprover(value: ApprovedUsersApprover | FormatterOptions): value is ApprovedUsersApprover {
+  return typeof (value as ApprovedUsersApprover).approve === 'function';
 }
 
 function textOnly(text: string): BotReply {
