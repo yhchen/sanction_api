@@ -60,6 +60,8 @@ ADMIN_TELEGRAM_USERS=
 APPROVED_TELEGRAM_USERS_PATH=./approved-users.json
 SENZING_PATH=./senzing.json
 TARGETS_NESTED_PATH=./targets.nested.json
+REFRESH_METADATA_PATH=./refresh-metadata.json
+REFRESH_SCHEDULE_TIME=05:00
 MAX_RESULTS=5
 MAX_MESSAGE_CHARS=3800
 ```
@@ -143,7 +145,7 @@ node dist/index.js
 - `/basic` - 显示基础记录信息
 - `/full` - 显示完整制裁详情
 
-`/request` 和 `/approve` 不显示在命令菜单中，但命令仍然可用。未授权用户通过 `/start` 的提示知道可以发送 `/request` 申请访问；管理员收到申请后仍然可以手动发送 `/approve <telegram_user_id>`，或回复申请消息 `/approve`。
+`/request`、`/approve` 和管理员专用 `/update` 不显示在命令菜单中，但命令仍然可用。未授权用户通过 `/start` 的提示知道可以发送 `/request` 申请访问；管理员收到申请后仍然可以手动发送 `/approve <telegram_user_id>`，或回复申请消息 `/approve`。
 
 从菜单选择 `/check`、`/basic` 或 `/full` 时，Telegram 只会发送命令本身；机器人会提示用户继续发送完整名称。下一条普通文本会按所选模式查询并清除等待状态。如果用户在输入名称前又选择另一个查询命令，新命令会覆盖旧等待模式。发送 `/cancel` 可以取消当前等待输入模式。`/cancel` 不显示在命令菜单中。
 
@@ -193,6 +195,7 @@ node dist/index.js
 | 菜单查询 | 选择 `/check`、`/basic` 或 `/full` 后，再发送完整名称 |
 | 取消等待输入 | `/cancel` |
 | 纯文本查询 | `YATAI SMART INDUSTRIAL NEW CITY` |
+| 管理员刷新数据 | `/update` |
 
 查询规则：
 
@@ -201,7 +204,39 @@ node dist/index.js
 - 只有风险主题包含 `debarment` 的记录会显示为 `Debarred`。
 - 如果没有等待输入模式，普通文本会按 `/check <name>` 查询。
 
-## 10. 其他访问模式
+## 10. 管理员数据刷新
+
+管理员可以在 Telegram 中发送：
+
+```text
+/update
+```
+
+该命令不会出现在公开命令菜单中，也不会开放给普通用户。机器人会使用 OpenSanctions debarment metadata endpoint 检查目标资源：
+
+```text
+https://data.opensanctions.org/datasets/latest/debarment/index.json
+```
+
+安全刷新规则：
+
+- 先比较远端 `senzing.json` 和 `targets.nested.json` checksum 与本地 `REFRESH_METADATA_PATH`。
+- checksum 未变化时，不下载完整文件，直接回复数据已是最新。
+- 任一目标文件变化时，从同一 metadata version 下载两个文件到临时路径。
+- 下载后先验证并重建内存索引；成功后才替换本地文件、写入 metadata，并热切换查询数据。
+- metadata 获取、下载、验证或重建失败时，旧本地文件和旧查询索引继续使用。
+- 如果定时任务正在刷新，管理员手动 `/update` 会收到已有刷新正在运行的回复，不会启动第二条流水线。
+
+机器人启动后会每天自动检查一次，默认服务器本地时区 05:00。可通过 `.env` 调整：
+
+```dotenv
+REFRESH_METADATA_PATH=./refresh-metadata.json
+REFRESH_SCHEDULE_TIME=05:00
+```
+
+确认运行进程对 `SENZING_PATH`、`TARGETS_NESTED_PATH` 和 `REFRESH_METADATA_PATH` 所在目录有写权限。
+
+## 11. 其他访问模式
 
 管理员批准模式是推荐的私有部署方式。如果需要其他模式，可以改环境变量。
 
@@ -233,7 +268,7 @@ ADMIN_TELEGRAM_USERS=123456789
 APPROVED_TELEGRAM_USERS_PATH=./approved-users.json
 ```
 
-## 11. 常见问题排查
+## 12. 常见问题排查
 
 ### Bot 启动时报 `TELEGRAM_BOT_TOKEN is required`
 
@@ -278,7 +313,7 @@ node dist/index.js
 - 运行机器人进程的系统用户是否有写权限。
 - 管理员执行的是 `/approve <telegram_user_id>`，或回复申请消息 `/approve`。
 
-## 12. 安全检查清单
+## 13. 安全检查清单
 
 上线前确认：
 
@@ -288,10 +323,11 @@ node dist/index.js
 - [ ] `ADMIN_TELEGRAM_USERS` 使用数字 ID，不是用户名。
 - [ ] 私有部署没有设置 `ALLOWED_TELEGRAM_USERS=*`。
 - [ ] 服务器上的 `.env` 权限尽量限制为 `600`。
-- [ ] 数据文件路径正确，机器人进程可读。
+- [ ] 数据文件路径正确，机器人进程可读、可在刷新成功时写入。
+- [ ] `REFRESH_METADATA_PATH` 所在目录可写，且运行时 metadata 文件没有提交到 Git。
 - [ ] `APPROVED_TELEGRAM_USERS_PATH` 所在目录可写。
 
-## 13. 官方参考
+## 14. 官方参考
 
 - Telegram BotFather 教程：<https://core.telegram.org/bots/tutorial>
 - Telegram Bot API：<https://core.telegram.org/bots/api>

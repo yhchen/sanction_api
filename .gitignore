@@ -12,3 +12,4 @@ entities.ftm.json
 
 # Runtime Telegram access state
 approved-users.json
+refresh-metadata.json

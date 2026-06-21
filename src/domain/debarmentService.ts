@@ -12,15 +12,59 @@ export interface DebarmentServiceOptions {
   maxResults?: number;
 }
 
-export class DebarmentService {
-  private readonly maxResults: number;
+export interface ActiveDebarmentRepositorySnapshot {
+  senzingRepository: SenzingLookupRepository;
+  targetDetailsRepository?: TargetDetailsRepository;
+}
+
+export class ActiveDebarmentRepositories {
+  private snapshotValue: ActiveDebarmentRepositorySnapshot;
 
   constructor(
-    private readonly senzingRepository: SenzingLookupRepository,
-    private readonly targetDetailsRepository?: TargetDetailsRepository,
+    senzingRepository: SenzingLookupRepository,
+    targetDetailsRepository?: TargetDetailsRepository,
+  ) {
+    this.snapshotValue = { senzingRepository, targetDetailsRepository };
+  }
+
+  snapshot(): ActiveDebarmentRepositorySnapshot {
+    return this.snapshotValue;
+  }
+
+  replace(
+    senzingRepository: SenzingLookupRepository,
+    targetDetailsRepository?: TargetDetailsRepository,
+  ): void {
+    this.snapshotValue = { senzingRepository, targetDetailsRepository };
+  }
+}
+
+export class DebarmentService {
+  private readonly maxResults: number;
+  private readonly activeRepositories: ActiveDebarmentRepositories;
+
+  constructor(
+    senzingRepositoryOrActiveRepositories: SenzingLookupRepository | ActiveDebarmentRepositories,
+    targetDetailsRepositoryOrOptions?: TargetDetailsRepository | DebarmentServiceOptions,
     options: DebarmentServiceOptions = {},
   ) {
-    this.maxResults = Math.max(1, options.maxResults ?? 5);
+    if (senzingRepositoryOrActiveRepositories instanceof ActiveDebarmentRepositories) {
+      this.activeRepositories = senzingRepositoryOrActiveRepositories;
+      this.maxResults = Math.max(1, (targetDetailsRepositoryOrOptions as DebarmentServiceOptions | undefined)?.maxResults ?? 5);
+      return;
+    }
+
+    const targetDetailsRepository = isDebarmentServiceOptions(targetDetailsRepositoryOrOptions)
+      ? undefined
+      : targetDetailsRepositoryOrOptions;
+    const resolvedOptions = isDebarmentServiceOptions(targetDetailsRepositoryOrOptions)
+      ? targetDetailsRepositoryOrOptions
+      : options;
+    this.activeRepositories = new ActiveDebarmentRepositories(
+      senzingRepositoryOrActiveRepositories,
+      targetDetailsRepository,
+    );
+    this.maxResults = Math.max(1, resolvedOptions.maxResults ?? 5);
   }
 
   async check(name: string): Promise<DebarmentQueryResult> {
@@ -44,25 +88,32 @@ export class DebarmentService {
   }
 
   private queryByName(name: string, includeTargetDetails: boolean): DebarmentQueryResult {
-    const allMatches = this.senzingRepository.findByName(name).filter((match) => isDebarmentRecord(match.record));
-    return this.materialize(name, allMatches, includeTargetDetails);
+    const repositories = this.activeRepositories.snapshot();
+    const allMatches = repositories.senzingRepository.findByName(name).filter((match) => isDebarmentRecord(match.record));
+    return this.materialize(name, allMatches, includeTargetDetails, repositories.targetDetailsRepository);
   }
 
   private queryByRecordId(recordId: string, includeTargetDetails: boolean): DebarmentQueryResult {
-    const record = this.senzingRepository.findByRecordId(recordId);
+    const repositories = this.activeRepositories.snapshot();
+    const record = repositories.senzingRepository.findByRecordId(recordId);
     if (!record || !isDebarmentRecord(record)) {
       return emptyResult(recordId);
     }
 
     const primaryName = getPrimaryName(record) ?? record.RECORD_ID;
-    return this.materialize(recordId, [{ record, matchedName: primaryName, matchedNameType: 'RECORD_ID' }], includeTargetDetails);
+    return this.materialize(recordId, [{ record, matchedName: primaryName, matchedNameType: 'RECORD_ID' }], includeTargetDetails, repositories.targetDetailsRepository);
   }
 
-  private materialize(query: string, allMatches: SenzingNameMatch[], includeTargetDetails: boolean): DebarmentQueryResult {
+  private materialize(
+    query: string,
+    allMatches: SenzingNameMatch[],
+    includeTargetDetails: boolean,
+    targetDetailsRepository: TargetDetailsRepository | undefined,
+  ): DebarmentQueryResult {
     const cappedMatches = allMatches.slice(0, this.maxResults);
     const matches = cappedMatches.map((match): DebarmentMatch => {
       const sanctions = includeTargetDetails
-        ? (this.targetDetailsRepository?.findSanctionsByRecordId(match.record.RECORD_ID) ?? [])
+        ? (targetDetailsRepository?.findSanctionsByRecordId(match.record.RECORD_ID) ?? [])
         : [];
       return {
         ...match,
@@ -157,4 +208,10 @@ function uniqueIdentifiers(identifiers: Array<{ type: string; value: string }>):
 
 function isNonEmptyString(value: string | undefined): value is string {
   return typeof value === 'string' && value.length > 0;
+}
+
+function isDebarmentServiceOptions(
+  value: TargetDetailsRepository | DebarmentServiceOptions | undefined,
+): value is DebarmentServiceOptions {
+  return value !== undefined && typeof (value as TargetDetailsRepository).findSanctionsByRecordId !== 'function';
 }

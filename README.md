@@ -10,6 +10,7 @@
 - 命中后会返回 `/basic` 和 `/full` 内联按钮，便于继续查看详情。
 - 支持三种访问控制模式：公开、静态白名单、管理员批准。
 - 未授权用户可发送 `/request` 申请访问；管理员可用 `/approve` 批准。
+- 管理员可手动发送 `/update` 检查 OpenSanctions debarment 数据更新；机器人也会每天 05:00 自动检查。
 
 ## 数据文件
 
@@ -20,6 +21,7 @@
 | `senzing.json` | 启动时加载到内存，建立名称索引；也是 `/basic` 的数据来源。 |
 | `targets.nested.json` | 通过 OpenSanctions record id 读取 `/full` 制裁详情。 |
 | `entities.ftm.json` | V1 阶段只做过评估，不作为当前查询数据源。 |
+| `refresh-metadata.json` | 最近一次成功刷新后的 dataset version 和目标资源 checksum，用于避免无变化时下载大文件。 |
 
 注意：虽然文件名是 `.json`，当前读取逻辑按 JSONL 处理，也就是每一行都是一个独立 JSON 对象。
 
@@ -61,6 +63,8 @@ export ADMIN_TELEGRAM_USERS="123456789"
 export APPROVED_TELEGRAM_USERS_PATH="./approved-users.json"
 export SENZING_PATH="./senzing.json"
 export TARGETS_NESTED_PATH="./targets.nested.json"
+export REFRESH_METADATA_PATH="./refresh-metadata.json"
+export REFRESH_SCHEDULE_TIME="05:00"
 export MAX_RESULTS="5"
 export MAX_MESSAGE_CHARS="3800"
 ```
@@ -92,10 +96,12 @@ npm run dev
 | `APPROVED_TELEGRAM_USERS_PATH` | `./approved-users.json` | 管理员批准后的用户 ID 存储文件。运行进程必须有写入权限。 |
 | `SENZING_PATH` | `./senzing.json` | `senzing.json` 数据文件路径。 |
 | `TARGETS_NESTED_PATH` | `./targets.nested.json` | `targets.nested.json` 数据文件路径。 |
+| `REFRESH_METADATA_PATH` | `./refresh-metadata.json` | 最近一次成功数据刷新的 metadata/checksum 存储路径。运行进程必须有写入权限。 |
+| `REFRESH_SCHEDULE_TIME` | `05:00` | 每日自动刷新检查时间，使用运行服务器本地时区，格式为 `HH:MM`。 |
 | `MAX_RESULTS` | `5` | 单次查询最多返回的匹配数量。 |
 | `MAX_MESSAGE_CHARS` | `3800` | 单条 Telegram 消息的最大输出字符数；不能超过 Telegram 限制。 |
 
-`approved-users.json` 会包含真实 Telegram 用户 ID，已被 `.gitignore` 忽略，不要提交到仓库。
+`approved-users.json` 会包含真实 Telegram 用户 ID，已被 `.gitignore` 忽略，不要提交到仓库。`refresh-metadata.json` 是运行时状态文件，也不应提交。
 
 ## 访问控制配置
 
@@ -134,7 +140,7 @@ npm run dev
 - `/basic` - 显示基础记录信息
 - `/full` - 显示完整制裁详情
 
-`/request` 和 `/approve` 仍然可以手动输入使用，但不会显示在命令菜单中。未授权用户通过 `/start` 的提示了解如何发送 `/request` 申请访问；管理员仍可手动使用 `/approve` 批准用户。
+`/request`、`/approve` 和管理员专用的 `/update` 仍然可以手动输入使用，但不会显示在命令菜单中。未授权用户通过 `/start` 的提示了解如何发送 `/request` 申请访问；管理员仍可手动使用 `/approve` 批准用户。
 
 从菜单选择 `/check`、`/basic` 或 `/full` 时，Telegram 只会发送命令本身；机器人会提示用户继续发送完整名称。发送 `/cancel` 可以取消当前等待输入模式。`/cancel` 不显示在命令菜单中。
 
@@ -174,6 +180,8 @@ export ADMIN_TELEGRAM_USERS="<admin-telegram-numeric-id>"
 export APPROVED_TELEGRAM_USERS_PATH="./approved-users.json"
 export SENZING_PATH="./senzing.json"
 export TARGETS_NESTED_PATH="./targets.nested.json"
+export REFRESH_METADATA_PATH="./refresh-metadata.json"
+export REFRESH_SCHEDULE_TIME="05:00"
 export MAX_RESULTS="5"
 export MAX_MESSAGE_CHARS="3800"
 ```
@@ -212,7 +220,34 @@ node dist/index.js
 2. 被批准的用户会收到访问已开通的通知。
 3. 用户可以使用 `/check`、`/basic`、`/full`，也可以直接发送完整名称查询。
 
-### 7. 管理员收不到申请通知时的检查项
+### 7. 管理员数据刷新
+
+管理员可以手动发送：
+
+```text
+/update
+```
+
+机器人会先读取 OpenSanctions debarment metadata：
+
+```text
+https://data.opensanctions.org/datasets/latest/debarment/index.json
+```
+
+刷新流程：
+
+1. 比较远端 `senzing.json` 和 `targets.nested.json` 的 checksum 与 `REFRESH_METADATA_PATH` 中的本地 metadata。
+2. 如果 checksum 相同，不下载完整文件，直接回复数据已经是最新。
+3. 如果任一目标资源变化，从同一个 metadata version 下载两个目标资源到临时文件。
+4. 先验证并用临时文件重建内存索引。
+5. 只有两个 repository 都构建成功后，才替换本地文件、写入刷新 metadata，并热切换查询服务。
+6. 任何 metadata、下载、验证或索引构建失败都会保留旧数据，玩家查询继续使用旧索引。
+
+机器人启动后还会按 `REFRESH_SCHEDULE_TIME` 每天自动执行同一条安全刷新路径，默认是服务器本地时区 05:00。并发刷新会被拒绝，管理员会收到已有刷新正在运行的回复。
+
+`/update` 不会加入公开命令菜单；只有 `ADMIN_TELEGRAM_USERS` 中的管理员可以执行。
+
+### 8. 管理员收不到申请通知时的检查项
 
 请确认：
 
@@ -234,6 +269,7 @@ node dist/index.js
 | 菜单查询 | 选择 `/check`、`/basic` 或 `/full` 后，再发送完整名称 |
 | 取消等待输入 | `/cancel` |
 | 管理员批准用户 | `/approve 123456789` |
+| 管理员刷新数据 | `/update` |
 | 纯文本查询 | `YATAI SMART INDUSTRIAL NEW CITY` |
 
 ## 架构说明

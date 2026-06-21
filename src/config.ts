@@ -7,6 +7,8 @@ export interface AppConfig {
   approvedTelegramUsersPath: string;
   senzingPath: string;
   targetsNestedPath: string;
+  refreshMetadataPath: string;
+  refreshScheduleTime: string;
   maxResults: number;
   maxMessageChars: number;
 }
@@ -32,9 +34,19 @@ export function loadConfig(
     approvedTelegramUsersPath: env.APPROVED_TELEGRAM_USERS_PATH?.trim() || './approved-users.json',
     senzingPath: env.SENZING_PATH?.trim() || './senzing.json',
     targetsNestedPath: env.TARGETS_NESTED_PATH?.trim() || './targets.nested.json',
+    refreshMetadataPath: env.REFRESH_METADATA_PATH?.trim() || './refresh-metadata.json',
+    refreshScheduleTime: scheduleTime(env.REFRESH_SCHEDULE_TIME, '05:00', 'REFRESH_SCHEDULE_TIME'),
     maxResults: positiveInteger(env.MAX_RESULTS, 5, 'MAX_RESULTS'),
     maxMessageChars: boundedPositiveInteger(env.MAX_MESSAGE_CHARS, 3800, 'MAX_MESSAGE_CHARS', TELEGRAM_MAX_MESSAGE_CHARS),
   };
+}
+
+function scheduleTime(rawValue: string | undefined, defaultValue: string, envName: string): string {
+  const value = rawValue?.trim() || defaultValue;
+  if (!/^\d{2}:\d{2}$/u.test(value)) throw new Error(`${envName} must use HH:MM format.`);
+  const [hours, minutes] = value.split(':').map(Number);
+  if (hours > 23 || minutes > 59) throw new Error(`${envName} must use HH:MM format.`);
+  return value;
 }
 
 function positiveInteger(rawValue: string | undefined, defaultValue: number, envName: string): number {

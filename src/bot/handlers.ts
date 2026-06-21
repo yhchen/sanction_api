@@ -2,6 +2,7 @@ import type { DebarmentService } from '../domain/debarmentService.js';
 import type { BotReply } from '../domain/types.js';
 import type { AccessControl } from './accessControl.js';
 import { formatBasicResults, formatCheckResult, formatFullResults, type FormatterOptions } from './formatters.js';
+import type { RefreshResult } from '../data/dataRefreshService.js';
 
 export interface TelegramUserProfile {
   id: string | number;
@@ -19,22 +20,33 @@ export interface ApprovedUsersApprover {
   approve(userId: string | number): Promise<{ userId: string; alreadyApproved: boolean }>;
 }
 
+export interface DataRefreshRunner {
+  refreshNow(): Promise<RefreshResult>;
+}
+
 export class BotCommandHandler {
   private readonly approvedUsers?: ApprovedUsersApprover;
   private readonly formatterOptions: FormatterOptions;
+  private readonly dataRefreshRunner?: DataRefreshRunner;
   private readonly pendingQueries = new Map<string, QueryCommand>();
 
   constructor(
     private readonly service: DebarmentService,
     private readonly accessControl: AccessControl,
-    approvedUsersOrFormatterOptions: ApprovedUsersApprover | FormatterOptions = {},
-    formatterOptions: FormatterOptions = {},
+    approvedUsersOrFormatterOptionsOrDataRefreshRunner: ApprovedUsersApprover | FormatterOptions | DataRefreshRunner = {},
+    formatterOptionsOrDataRefreshRunner: FormatterOptions | DataRefreshRunner = {},
+    dataRefreshRunner?: DataRefreshRunner,
   ) {
-    if (isApprovedUsersApprover(approvedUsersOrFormatterOptions)) {
-      this.approvedUsers = approvedUsersOrFormatterOptions;
-      this.formatterOptions = formatterOptions;
+    if (isApprovedUsersApprover(approvedUsersOrFormatterOptionsOrDataRefreshRunner)) {
+      this.approvedUsers = approvedUsersOrFormatterOptionsOrDataRefreshRunner;
+      this.formatterOptions = isDataRefreshRunner(formatterOptionsOrDataRefreshRunner) ? {} : formatterOptionsOrDataRefreshRunner;
+      this.dataRefreshRunner = dataRefreshRunner ?? (isDataRefreshRunner(formatterOptionsOrDataRefreshRunner) ? formatterOptionsOrDataRefreshRunner : undefined);
+    } else if (isDataRefreshRunner(approvedUsersOrFormatterOptionsOrDataRefreshRunner)) {
+      this.formatterOptions = {};
+      this.dataRefreshRunner = approvedUsersOrFormatterOptionsOrDataRefreshRunner;
     } else {
-      this.formatterOptions = approvedUsersOrFormatterOptions;
+      this.formatterOptions = approvedUsersOrFormatterOptionsOrDataRefreshRunner;
+      this.dataRefreshRunner = isDataRefreshRunner(formatterOptionsOrDataRefreshRunner) ? formatterOptionsOrDataRefreshRunner : dataRefreshRunner;
     }
   }
 
@@ -69,6 +81,10 @@ export class BotCommandHandler {
     if (parsed?.command === 'approve') {
       this.clearPendingQuery(userId);
       return this.handleApprove(userId, parsed.argument, metadata.replyToText);
+    }
+    if (parsed?.command === 'update') {
+      this.clearPendingQuery(userId);
+      return this.handleUpdate(userId);
     }
 
     if (!this.accessControl.isAllowed(userId)) {
@@ -146,6 +162,14 @@ export class BotCommandHandler {
     };
   }
 
+  private async handleUpdate(userId: string | number | undefined): Promise<BotReply> {
+    if (!this.accessControl.isAdmin(userId)) return textOnly('Unauthorized.');
+    if (!this.dataRefreshRunner) return textOnly('Data refresh is not configured.');
+
+    const result = await this.dataRefreshRunner.refreshNow();
+    return textOnly(formatRefreshResult(result));
+  }
+
   private waitForQueryArgument(command: QueryCommand, userId: string | number | undefined): BotReply {
     const key = pendingKey(userId);
     if (!key) return textOnly(`Usage: /${command} <name>`);
@@ -184,10 +208,10 @@ export class BotCommandHandler {
 }
 
 type QueryCommand = 'check' | 'basic' | 'full';
-type SupportedCommand = QueryCommand | 'request' | 'approve' | 'cancel';
+type SupportedCommand = QueryCommand | 'request' | 'approve' | 'update' | 'cancel';
 
 function parseCommand(message: string): { command: SupportedCommand; argument: string } | undefined {
-  const match = message.match(/^\/(check|basic|full|request|approve|cancel)(?:@\w+)?(?:\s+([\s\S]*))?$/i);
+  const match = message.match(/^\/(check|basic|full|request|approve|update|cancel)(?:@\w+)?(?:\s+([\s\S]*))?$/i);
   if (!match) return undefined;
   return {
     command: match[1].toLocaleLowerCase('en-US') as SupportedCommand,
@@ -216,8 +240,19 @@ function extractRequesterId(replyToText: string | undefined): string {
   return match?.[1] ?? '';
 }
 
-function isApprovedUsersApprover(value: ApprovedUsersApprover | FormatterOptions): value is ApprovedUsersApprover {
+function isApprovedUsersApprover(value: ApprovedUsersApprover | FormatterOptions | DataRefreshRunner): value is ApprovedUsersApprover {
   return typeof (value as ApprovedUsersApprover).approve === 'function';
+}
+
+function isDataRefreshRunner(value: ApprovedUsersApprover | FormatterOptions | DataRefreshRunner): value is DataRefreshRunner {
+  return typeof (value as DataRefreshRunner).refreshNow === 'function';
+}
+
+function formatRefreshResult(result: RefreshResult): string {
+  if (result.status === 'current') return result.message || 'OpenSanctions debarment data is already current.';
+  if (result.status === 'updated') return result.message || 'OpenSanctions debarment data was updated.';
+  if (result.status === 'in_progress') return result.message || 'Data refresh is already running.';
+  return result.message || 'Data refresh failed.';
 }
 
 function textOnly(text: string): BotReply {
