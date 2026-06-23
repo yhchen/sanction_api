@@ -7,6 +7,7 @@ import type { BotReply } from '../domain/types.js';
 export const VISIBLE_BOT_COMMANDS: BotCommand[] = [
   { command: 'start', description: '显示帮助和访问状态' },
   { command: 'check', description: '查询完整名称的 Debarred 状态' },
+  { command: 'search', description: '按部分名称搜索候选' },
   { command: 'basic', description: '显示基础记录信息' },
   { command: 'full', description: '显示完整制裁详情' },
 ];
@@ -28,7 +29,7 @@ export function createBot(token: string, handler: BotCommandHandler): Telegraf<C
     await replyToContext(ctx, await handler.handleStart(ctx.from?.id));
   });
 
-  bot.command(['check', 'basic', 'full', 'request', 'approve', 'update', 'cancel'], async (ctx) => {
+  bot.command(['check', 'search', 'basic', 'full', 'request', 'approve', 'update', 'cancel'], async (ctx) => {
     await replyToContext(ctx, await handler.handleMessage(ctx.message.text, ctx.from?.id, metadataFromContext(ctx)));
   });
 

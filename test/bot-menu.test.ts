@@ -12,7 +12,7 @@ describe('Telegram command menu registration', () => {
     await registerBotCommands(bot);
 
     expect(bot.telegram.setMyCommands).toHaveBeenCalledWith(VISIBLE_BOT_COMMANDS);
-    expect(VISIBLE_BOT_COMMANDS.map((command) => command.command)).toEqual(['start', 'check', 'basic', 'full']);
+    expect(VISIBLE_BOT_COMMANDS.map((command) => command.command)).toEqual(['start', 'check', 'search', 'basic', 'full']);
     expect(VISIBLE_BOT_COMMANDS.map((command) => command.command)).not.toContain('request');
     expect(VISIBLE_BOT_COMMANDS.map((command) => command.command)).not.toContain('approve');
   });

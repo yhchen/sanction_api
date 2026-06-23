@@ -142,12 +142,13 @@ node dist/index.js
 
 - `/start` - 显示帮助和访问状态
 - `/check` - 查询完整名称的 Debarred 状态
+- `/search` - 按名称或部分名称搜索候选
 - `/basic` - 显示基础记录信息
 - `/full` - 显示完整制裁详情
 
 `/request`、`/approve` 和管理员专用 `/update` 不显示在命令菜单中，但命令仍然可用。未授权用户通过 `/start` 的提示知道可以发送 `/request` 申请访问；管理员收到申请后仍然可以手动发送 `/approve <telegram_user_id>`，或回复申请消息 `/approve`。
 
-从菜单选择 `/check`、`/basic` 或 `/full` 时，Telegram 只会发送命令本身；机器人会提示用户继续发送完整名称。下一条普通文本会按所选模式查询并清除等待状态。如果用户在输入名称前又选择另一个查询命令，新命令会覆盖旧等待模式。发送 `/cancel` 可以取消当前等待输入模式。`/cancel` 不显示在命令菜单中。
+从菜单选择 `/check`、`/basic` 或 `/full` 时，Telegram 只会发送命令本身；机器人会提示用户继续发送完整名称。选择 `/search` 时，机器人会提示用户发送名称或部分名称。下一条普通文本会按所选模式查询并清除等待状态。如果用户在输入名称前又选择另一个查询命令，新命令会覆盖旧等待模式。发送 `/cancel` 可以取消当前等待输入模式。`/cancel` 不显示在命令菜单中。
 
 如果启动时命令菜单注册失败，机器人会启动失败并退出。此时优先检查 `TELEGRAM_BOT_TOKEN`、网络连接和 Telegram API 可用性。
 
@@ -190,19 +191,21 @@ node dist/index.js
 | --- | --- |
 | 查看帮助和访问状态 | `/start` |
 | 查询完整名称 | `/check YATAI SMART INDUSTRIAL NEW CITY` |
+| 搜索候选名称 | `/search Yatai Smart` |
+| 纯文本候选搜索 | `Yatai Smart` |
 | 查询基础信息 | `/basic YATAI SMART INDUSTRIAL NEW CITY` |
 | 查询完整制裁详情 | `/full YATAI SMART INDUSTRIAL NEW CITY` |
-| 菜单查询 | 选择 `/check`、`/basic` 或 `/full` 后，再发送完整名称 |
+| 菜单查询 | 选择 `/check`、`/basic` 或 `/full` 后，再发送完整名称；选择 `/search` 后发送部分名称 |
 | 取消等待输入 | `/cancel` |
-| 纯文本查询 | `YATAI SMART INDUSTRIAL NEW CITY` |
+| 精确完整名称状态查询 | `/check YATAI SMART INDUSTRIAL NEW CITY` |
 | 管理员刷新数据 | `/update` |
 
 查询规则：
 
-- 必须输入完整名称。
-- 不支持部分名称匹配。
-- 只有风险主题包含 `debarment` 的记录会显示为 `Debarred`。
-- 如果没有等待输入模式，普通文本会按 `/check <name>` 查询。
+- `/check`、`/basic`、`/full` 必须输入完整名称并保持精确匹配。
+- `/search` 和无等待模式下的普通文本支持部分名称的模糊候选搜索。
+- 模糊候选搜索只搜索 `NAMES[].NAME_FULL`，不搜索地址、编号或制裁详情全文。
+- 模糊候选搜索只返回可能匹配的名称候选，不直接显示为 `Debarred`。只有精确查询命中的、风险主题包含 `debarment` 的记录会显示为 `Debarred`。
 
 ## 10. 管理员数据刷新
 

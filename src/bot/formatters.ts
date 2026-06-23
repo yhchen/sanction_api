@@ -1,4 +1,4 @@
-import type { BotReply, DebarmentMatch, DebarmentQueryResult, ReplyButton, SanctionDetail } from '../domain/types.js';
+import type { BotReply, DebarmentCandidateSearchResult, DebarmentMatch, DebarmentQueryResult, ReplyButton, SanctionDetail } from '../domain/types.js';
 
 export interface FormatterOptions {
   maxMessageChars?: number;
@@ -59,6 +59,23 @@ export function formatFullResults(result: DebarmentQueryResult, options: Formatt
       });
     }
   });
+  return reply(truncateText(lines.join('\n'), options.maxMessageChars));
+}
+
+export function formatFuzzySearchResult(result: DebarmentCandidateSearchResult, options: FormatterOptions = {}): BotReply {
+  if (!result.found) return reply('No close name candidates found. Try a more complete name.');
+
+  const lines = ['Possible matches'];
+  if (result.truncated) lines.push(`Showing ${result.candidates.length} of ${result.totalCandidates} candidates. Refine your search if needed.`);
+  lines.push('', 'These are fuzzy name candidates, not a Debarred verdict. Use /check, /basic, or /full with the complete name for exact lookup.');
+
+  result.candidates.forEach((candidate, index) => {
+    lines.push('', `${index + 1}. ${candidate.basic.primaryName}`);
+    if (candidate.basic.matchedName !== candidate.basic.primaryName) lines.push(`   Matched Name: ${candidate.basic.matchedName}`);
+    lines.push(`   Record ID: ${candidate.basic.recordId}`);
+    lines.push(`   Score: ${candidate.score.toFixed(2)} (${candidate.matchReason})`);
+  });
+
   return reply(truncateText(lines.join('\n'), options.maxMessageChars));
 }
 

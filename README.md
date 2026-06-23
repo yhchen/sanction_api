@@ -5,8 +5,8 @@
 ## 功能概览
 
 - 通过 Telegram 查询完整名称是否命中 Debarred 记录。
-- 支持纯文本查询；发送名称等同于执行 `/check <name>`。
-- 支持 `/check`、`/basic`、`/full` 三类查询命令；菜单选择无参数命令时会等待用户下一条完整名称。
+- 支持纯文本模糊候选搜索；直接发送名称或部分名称会返回可能匹配的完整名称候选。
+- 支持 `/check`、`/search`、`/basic`、`/full` 查询命令；菜单选择无参数命令时会等待用户下一条输入。
 - 命中后会返回 `/basic` 和 `/full` 内联按钮，便于继续查看详情。
 - 支持三种访问控制模式：公开、静态白名单、管理员批准。
 - 未授权用户可发送 `/request` 申请访问；管理员可用 `/approve` 批准。
@@ -28,13 +28,15 @@
 ## 匹配规则
 
 - 查询使用规范化后的完整名称精确匹配，来源是 `NAMES[].NAME_FULL` 的主名称和别名。
-- 不支持部分名称匹配。例如：`Yatai Smart` 不等同于 `YATAI SMART INDUSTRIAL NEW CITY`。
+- `/check`、`/basic`、`/full` 仍使用完整名称精确匹配。例如：`/check Yatai Smart` 不等同于 `/check YATAI SMART INDUSTRIAL NEW CITY`。
+- `/search <name>` 和无等待模式下的纯文本会执行模糊候选搜索，只返回可能匹配的名称候选，不直接判定 `Debarred`。例如：`Yatai Smart` 可返回 `YATAI SMART INDUSTRIAL NEW CITY` 候选。
 - 只有包含风险主题 `debarment` 的记录会返回为 `Debarred`。
+- `/search <name>` 返回按相关性排序且数量受控的候选名称。
 - `/basic <name>` 返回基础记录信息。
 - `/full <name>` 返回制裁详情。
-- `/check`、`/basic`、`/full` 后面不带名称时，机器人会进入对应等待输入模式；下一条普通文本会作为完整名称执行并清除等待状态。
+- `/check`、`/basic`、`/full` 后面不带名称时，机器人会进入对应精确查询等待输入模式；下一条普通文本会作为完整名称执行并清除等待状态。`/search` 后面不带名称时，下一条普通文本会作为模糊候选搜索输入。
 - `/cancel` 可清除等待输入模式。
-- 当消息不是命令时，机器人会把纯文本内容当作 `/check <name>` 处理。
+- 当消息不是命令且没有等待输入模式时，机器人会把纯文本内容当作模糊候选搜索处理。
 
 ## 快速开始
 
@@ -137,12 +139,13 @@ npm run dev
 
 - `/start` - 显示帮助和访问状态
 - `/check` - 查询完整名称的 Debarred 状态
+- `/search` - 按名称或部分名称搜索候选
 - `/basic` - 显示基础记录信息
 - `/full` - 显示完整制裁详情
 
 `/request`、`/approve` 和管理员专用的 `/update` 仍然可以手动输入使用，但不会显示在命令菜单中。未授权用户通过 `/start` 的提示了解如何发送 `/request` 申请访问；管理员仍可手动使用 `/approve` 批准用户。
 
-从菜单选择 `/check`、`/basic` 或 `/full` 时，Telegram 只会发送命令本身；机器人会提示用户继续发送完整名称。发送 `/cancel` 可以取消当前等待输入模式。`/cancel` 不显示在命令菜单中。
+从菜单选择 `/check`、`/basic` 或 `/full` 时，Telegram 只会发送命令本身；机器人会提示用户继续发送完整名称。选择 `/search` 时，机器人会提示用户发送名称或部分名称用于候选搜索。发送 `/cancel` 可以取消当前等待输入模式。`/cancel` 不显示在命令菜单中。
 
 如果启动时 Telegram 命令菜单注册失败，机器人会启动失败并退出，便于部署时及时发现 token、网络或 Telegram API 配置问题。
 
@@ -218,7 +221,7 @@ node dist/index.js
 
 1. 机器人会把用户 ID 写入 `approved-users.json`。
 2. 被批准的用户会收到访问已开通的通知。
-3. 用户可以使用 `/check`、`/basic`、`/full`，也可以直接发送完整名称查询。
+3. 用户可以使用 `/check`、`/basic`、`/full` 做完整名称精确查询，也可以发送名称或部分名称、或使用 `/search` 做模糊候选搜索。
 
 ### 7. 管理员数据刷新
 
@@ -264,13 +267,15 @@ https://data.opensanctions.org/datasets/latest/debarment/index.json
 | 查看帮助和访问状态 | `/start` |
 | 申请访问 | `/request` |
 | 查询完整名称 | `/check YATAI SMART INDUSTRIAL NEW CITY` |
+| 搜索候选名称 | `/search Yatai Smart` |
+| 纯文本候选搜索 | `Yatai Smart` |
 | 查询基础信息 | `/basic YATAI SMART INDUSTRIAL NEW CITY` |
 | 查询完整制裁详情 | `/full YATAI SMART INDUSTRIAL NEW CITY` |
-| 菜单查询 | 选择 `/check`、`/basic` 或 `/full` 后，再发送完整名称 |
+| 菜单查询 | 选择 `/check`、`/basic` 或 `/full` 后，再发送完整名称；选择 `/search` 后发送部分名称 |
 | 取消等待输入 | `/cancel` |
 | 管理员批准用户 | `/approve 123456789` |
 | 管理员刷新数据 | `/update` |
-| 纯文本查询 | `YATAI SMART INDUSTRIAL NEW CITY` |
+| 精确完整名称状态查询 | `/check YATAI SMART INDUSTRIAL NEW CITY` |
 
 ## 架构说明
 

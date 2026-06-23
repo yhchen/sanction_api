@@ -1,7 +1,10 @@
 import type {
   BasicInfo,
+  DebarmentCandidate,
+  DebarmentCandidateSearchResult,
   DebarmentMatch,
   DebarmentQueryResult,
+  SenzingNameCandidate,
   SenzingNameMatch,
   SenzingRecord,
   SenzingLookupRepository,
@@ -79,6 +82,10 @@ export class DebarmentService {
     return this.queryByName(name, true);
   }
 
+  async searchCandidates(name: string): Promise<DebarmentCandidateSearchResult> {
+    return this.searchCandidateNames(name);
+  }
+
   async basicByRecordId(recordId: string): Promise<DebarmentQueryResult> {
     return this.queryByRecordId(recordId, false);
   }
@@ -91,6 +98,23 @@ export class DebarmentService {
     const repositories = this.activeRepositories.snapshot();
     const allMatches = repositories.senzingRepository.findByName(name).filter((match) => isDebarmentRecord(match.record));
     return this.materialize(name, allMatches, includeTargetDetails, repositories.targetDetailsRepository);
+  }
+
+  private searchCandidateNames(name: string): DebarmentCandidateSearchResult {
+    const repositories = this.activeRepositories.snapshot();
+    const allCandidates = uniqueCandidatesByRecord(
+      repositories.senzingRepository
+        .findCandidateNames(name)
+        .filter((candidate) => isDebarmentRecord(candidate.record)),
+    );
+    const cappedCandidates = allCandidates.slice(0, this.maxResults);
+    return {
+      query: name,
+      found: allCandidates.length > 0,
+      candidates: cappedCandidates.map(toCandidate),
+      totalCandidates: allCandidates.length,
+      truncated: allCandidates.length > cappedCandidates.length,
+    };
   }
 
   private queryByRecordId(recordId: string, includeTargetDetails: boolean): DebarmentQueryResult {
@@ -130,6 +154,22 @@ export class DebarmentService {
       truncated: allMatches.length > cappedMatches.length,
     };
   }
+}
+
+function uniqueCandidatesByRecord(candidates: SenzingNameCandidate[]): SenzingNameCandidate[] {
+  const seen = new Set<string>();
+  return candidates.filter((candidate) => {
+    if (seen.has(candidate.record.RECORD_ID)) return false;
+    seen.add(candidate.record.RECORD_ID);
+    return true;
+  });
+}
+
+function toCandidate(candidate: SenzingNameCandidate): DebarmentCandidate {
+  return {
+    ...candidate,
+    basic: toBasicInfo(candidate),
+  };
 }
 
 function emptyResult(query: string): DebarmentQueryResult {

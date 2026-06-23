@@ -86,6 +86,11 @@ export interface SenzingNameMatch {
   matchedNameType?: string | null;
 }
 
+export interface SenzingNameCandidate extends SenzingNameMatch {
+  score: number;
+  matchReason: string;
+}
+
 export interface RepositoryStats {
   records: number;
   indexedNames?: number;
@@ -93,6 +98,7 @@ export interface RepositoryStats {
 
 export interface SenzingLookupRepository {
   findByName(name: string): SenzingNameMatch[];
+  findCandidateNames(name: string): SenzingNameCandidate[];
   findByRecordId(recordId: string): SenzingRecord | undefined;
   stats(): RepositoryStats;
 }
@@ -128,6 +134,23 @@ export interface DebarmentQueryResult {
   found: boolean;
   matches: DebarmentMatch[];
   totalMatches: number;
+  truncated: boolean;
+}
+
+export interface DebarmentCandidate {
+  record: SenzingRecord;
+  matchedName: string;
+  matchedNameType?: string | null;
+  score: number;
+  matchReason: string;
+  basic: BasicInfo;
+}
+
+export interface DebarmentCandidateSearchResult {
+  query: string;
+  found: boolean;
+  candidates: DebarmentCandidate[];
+  totalCandidates: number;
   truncated: boolean;
 }
 

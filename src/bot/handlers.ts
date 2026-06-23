@@ -1,7 +1,7 @@
 import type { DebarmentService } from '../domain/debarmentService.js';
 import type { BotReply } from '../domain/types.js';
 import type { AccessControl } from './accessControl.js';
-import { formatBasicResults, formatCheckResult, formatFullResults, type FormatterOptions } from './formatters.js';
+import { formatBasicResults, formatCheckResult, formatFullResults, formatFuzzySearchResult, type FormatterOptions } from './formatters.js';
 import type { RefreshResult } from '../data/dataRefreshService.js';
 
 export interface TelegramUserProfile {
@@ -62,7 +62,7 @@ export class BotCommandHandler {
     }
 
     const adminSuffix = this.accessControl.isAdmin(userId) ? ' Admin commands: /approve <telegram_user_id>.' : '';
-    return textOnly(`Send a complete name to check Debarred status, or use /check, /basic, /full.${adminSuffix}`);
+    return textOnly(`Send a name to search candidates, or use /check, /search, /basic, /full.${adminSuffix}`);
   }
 
   async handleMessage(
@@ -71,7 +71,7 @@ export class BotCommandHandler {
     metadata: BotMessageMetadata = {},
   ): Promise<BotReply> {
     const message = rawMessage.trim();
-    if (!message) return textOnly('Send a full name or use /check <name>.');
+    if (!message) return textOnly('Send a name to search candidates, or use /search <name>.');
 
     const parsed = message.startsWith('/') ? parseCommand(message) : undefined;
     if (parsed?.command === 'request') {
@@ -96,10 +96,10 @@ export class BotCommandHandler {
     if (!message.startsWith('/')) {
       const pendingCommand = this.consumePendingQuery(userId);
       if (pendingCommand) return this.runQuery(pendingCommand, message);
-      return this.runQuery('check', message);
+      return this.runQuery('search', message);
     }
 
-    if (!parsed) return textOnly(this.approvedUsers ? 'Supported commands: /check <name>, /basic <name>, /full <name>, /request' : 'Supported commands: /check <name>, /basic <name>, /full <name>');
+    if (!parsed) return textOnly(this.supportedCommandsMessage());
 
     if (isQueryCommand(parsed.command)) {
       if (!parsed.argument) return this.waitForQueryArgument(parsed.command, userId);
@@ -107,7 +107,7 @@ export class BotCommandHandler {
       return this.runQuery(parsed.command, parsed.argument);
     }
 
-    return textOnly(this.approvedUsers ? 'Supported commands: /check <name>, /basic <name>, /full <name>, /request' : 'Supported commands: /check <name>, /basic <name>, /full <name>');
+    return textOnly(this.supportedCommandsMessage());
   }
 
   async handleCallback(callbackData: string, userId: string | number | undefined): Promise<BotReply> {
@@ -125,7 +125,7 @@ export class BotCommandHandler {
   }
 
   private handleRequest(userId: string | number | undefined, metadata: BotMessageMetadata): BotReply {
-    if (this.accessControl.isAllowed(userId)) return textOnly('You already have access. Send a complete name or use /check <name>.');
+    if (this.accessControl.isAllowed(userId)) return textOnly('You already have access. Send a name to search candidates or use /check <name>.');
     if (userId === undefined) return textOnly('Cannot request access because Telegram did not provide your user id.');
 
     const adminUserIds = [...this.accessControl.adminUserIds];
@@ -158,7 +158,7 @@ export class BotCommandHandler {
     return {
       text: `Approved user ${result.userId}.`,
       buttons: [],
-      notifications: [{ chatId: result.userId, text: 'Access approved. You can now send a complete name or use /check <name>.' }],
+      notifications: [{ chatId: result.userId, text: 'Access approved. You can now send a name to search candidates or use /check <name>.' }],
     };
   }
 
@@ -174,6 +174,7 @@ export class BotCommandHandler {
     const key = pendingKey(userId);
     if (!key) return textOnly(`Usage: /${command} <name>`);
     this.pendingQueries.set(key, command);
+    if (command === 'search') return textOnly('Send a name or partial name to search candidates, or /cancel.');
     return textOnly(`Send the complete name to run /${command}, or /cancel.`);
   }
 
@@ -203,15 +204,22 @@ export class BotCommandHandler {
         return formatBasicResults(await this.service.basic(name), this.formatterOptions);
       case 'full':
         return formatFullResults(await this.service.full(name), this.formatterOptions);
+      case 'search':
+        return formatFuzzySearchResult(await this.service.searchCandidates(name), this.formatterOptions);
     }
+  }
+
+  private supportedCommandsMessage(): string {
+    const base = 'Supported commands: /check <name>, /search <name>, /basic <name>, /full <name>';
+    return this.approvedUsers ? `${base}, /request` : base;
   }
 }
 
-type QueryCommand = 'check' | 'basic' | 'full';
+type QueryCommand = 'check' | 'search' | 'basic' | 'full';
 type SupportedCommand = QueryCommand | 'request' | 'approve' | 'update' | 'cancel';
 
 function parseCommand(message: string): { command: SupportedCommand; argument: string } | undefined {
-  const match = message.match(/^\/(check|basic|full|request|approve|update|cancel)(?:@\w+)?(?:\s+([\s\S]*))?$/i);
+  const match = message.match(/^\/(check|search|basic|full|request|approve|update|cancel)(?:@\w+)?(?:\s+([\s\S]*))?$/i);
   if (!match) return undefined;
   return {
     command: match[1].toLocaleLowerCase('en-US') as SupportedCommand,
@@ -220,7 +228,7 @@ function parseCommand(message: string): { command: SupportedCommand; argument: s
 }
 
 function isQueryCommand(command: SupportedCommand): command is QueryCommand {
-  return command === 'check' || command === 'basic' || command === 'full';
+  return command === 'check' || command === 'search' || command === 'basic' || command === 'full';
 }
 
 function pendingKey(userId: string | number | undefined): string | undefined {

@@ -7,7 +7,7 @@ import { ApprovedUsersRepository } from '../src/data/approvedUsersRepository.js'
 import { SenzingMemoryRepository } from '../src/data/senzingMemoryRepository.js';
 import { TargetsNestedMemoryRepository } from '../src/data/targetsNestedMemoryRepository.js';
 import { DebarmentService } from '../src/domain/debarmentService.js';
-import { formatBasicResults, formatCheckResult, formatFullResults } from '../src/bot/formatters.js';
+import { formatBasicResults, formatCheckResult, formatFullResults, formatFuzzySearchResult } from '../src/bot/formatters.js';
 import { createAccessControl } from '../src/bot/accessControl.js';
 import { BotCommandHandler } from '../src/bot/handlers.js';
 import { loadConfig } from '../src/config.js';
@@ -100,6 +100,32 @@ describe('normalized exact matching', () => {
 
     await expect(service.check('HARMLESS SHIPPING LTD')).resolves.toMatchObject({ found: false, matches: [] });
   });
+
+  test('searches fuzzy debarment candidates without changing exact matching', async () => {
+    const service = await buildService();
+
+    await expect(service.searchCandidates('Yatai Smart')).resolves.toMatchObject({
+      found: true,
+      candidates: [
+        { basic: { primaryName: 'YATAI SMART INDUSTRIAL NEW CITY' } },
+      ],
+    });
+    await expect(service.check('Yatai Smart')).resolves.toMatchObject({ found: false, matches: [] });
+    await expect(service.searchCandidates('HARMLESS SHIPPING LTD')).resolves.toMatchObject({ found: false, candidates: [] });
+    await expect(service.searchCandidates('HPA-AN CITY')).resolves.toMatchObject({ found: false, candidates: [] });
+    await expect(service.searchCandidates('PW2XZT68KVW9')).resolves.toMatchObject({ found: false, candidates: [] });
+  });
+
+  test('caps fuzzy candidate results and marks truncation', async () => {
+    const service = await buildService(1);
+
+    await expect(service.searchCandidates('DUPLICATE EXACT LIMITED')).resolves.toMatchObject({
+      found: true,
+      candidates: [{ basic: { recordId: 'NK-DUP-1' } }],
+      totalCandidates: 3,
+      truncated: true,
+    });
+  });
 });
 
 
@@ -155,6 +181,17 @@ describe('repositories and debarment service', () => {
     expect(repo.stats()).toMatchObject({ records: 5 });
     expect(repo.findByName('YATAI NEW CITY')[0]?.record.RECORD_ID).toBe('NK-223CQDBzp8MRkdJMDiqXn3');
     expect(repo.findByRecordId('NK-223CQDBzp8MRkdJMDiqXn3')?.URL).toContain('opensanctions.org');
+  });
+
+  test('finds fuzzy candidates by partial names only', async () => {
+    const repo = await SenzingMemoryRepository.fromFile(senzingFixture);
+
+    expect(repo.findCandidateNames('Yatai Smart')[0]).toMatchObject({
+      matchedName: 'YATAI SMART INDUSTRIAL NEW CITY',
+      record: { RECORD_ID: 'NK-223CQDBzp8MRkdJMDiqXn3' },
+    });
+    expect(repo.findCandidateNames('HPA-AN CITY')).toEqual([]);
+    expect(repo.findCandidateNames('PW2XZT68KVW9')).toEqual([]);
   });
 
   test('joins targets.nested details for full output', async () => {
@@ -214,6 +251,25 @@ describe('formatters', () => {
     expect(formatted.text).toContain('Showing 2 of 3 matches');
   });
 
+  test('formats fuzzy candidates without Debarred verdict language', async () => {
+    const formatted = formatFuzzySearchResult(await service.searchCandidates('Yatai Smart'));
+
+    expect(formatted.text).toMatch(/^Possible matches/);
+    expect(formatted.text).toContain('YATAI SMART INDUSTRIAL NEW CITY');
+    expect(formatted.text).not.toMatch(/^Debarred/);
+  });
+
+  test('formats fuzzy misses distinctly from exact No Data Found', async () => {
+    expect(formatFuzzySearchResult(await service.searchCandidates('missing')).text).toBe('No close name candidates found. Try a more complete name.');
+  });
+
+  test('formats capped fuzzy candidate results', async () => {
+    const limitedService = await buildService(1);
+    const formatted = formatFuzzySearchResult(await limitedService.searchCandidates('DUPLICATE EXACT LIMITED'));
+
+    expect(formatted.text).toContain('Showing 1 of 3 candidates');
+  });
+
   test('truncates long messages with a notice', async () => {
     const full = formatFullResults(await service.full('YATAI NEW CITY'), { maxMessageChars: 220 });
 
@@ -245,12 +301,16 @@ describe('access control and pure handlers', () => {
     expect([...accessControl.adminUserIds]).toEqual(['456']);
   });
 
-  test('plain text behaves as check and positive check includes action buttons', async () => {
+  test('plain text runs fuzzy search, even for exact full names', async () => {
     const handler = new BotCommandHandler(await buildService(), createAccessControl('*'));
-    const reply = await handler.handleMessage('YATAI NEW CITY', 123);
 
-    expect(reply.text.startsWith('Debarred')).toBe(true);
-    expect(reply.buttons.flat()).toHaveLength(2);
+    await expect(handler.handleMessage('Yatai Smart', 123)).resolves.toMatchObject({
+      text: expect.stringMatching(/^Possible matches/),
+    });
+    const exactNameReply = await handler.handleMessage('YATAI SMART INDUSTRIAL NEW CITY', 123);
+    expect(exactNameReply.text).toMatch(/^Possible matches/);
+    expect(exactNameReply.text).not.toMatch(/^Debarred/);
+    expect(exactNameReply.buttons.flat()).toHaveLength(0);
   });
 
   test('unauthorized start shows request instructions and user id', async () => {
@@ -316,7 +376,7 @@ describe('access control and pure handlers', () => {
 
     expect(reply).toMatchObject({
       text: 'Approved user 123.',
-      notifications: [{ chatId: '123', text: 'Access approved. You can now send a complete name or use /check <name>.' }],
+      notifications: [{ chatId: '123', text: 'Access approved. You can now send a name to search candidates or use /check <name>.' }],
     });
     expect(accessControl.isAllowed(123)).toBe(true);
   });
@@ -368,7 +428,7 @@ describe('access control and pure handlers', () => {
     const publicHandler = new BotCommandHandler(await buildService(), createAccessControl('*'));
     const privateHandler = new BotCommandHandler(await buildService(), createAccessControl('456'));
 
-    await expect(publicHandler.handleStart(123)).resolves.toMatchObject({ text: expect.stringContaining('Send a complete name') });
+    await expect(publicHandler.handleStart(123)).resolves.toMatchObject({ text: expect.stringContaining('Send a name to search candidates') });
     await expect(privateHandler.handleStart(123)).resolves.toMatchObject({ text: 'Unauthorized.' });
   });
 
@@ -378,6 +438,19 @@ describe('access control and pure handlers', () => {
     await expect(handler.handleMessage('/check YATAI NEW CITY', 123)).resolves.toMatchObject({ text: expect.stringMatching(/^Debarred/) });
     await expect(handler.handleMessage('/basic YATAI NEW CITY', 123)).resolves.toMatchObject({ text: expect.stringContaining('Basic Information') });
     await expect(handler.handleMessage('/full YATAI NEW CITY', 123)).resolves.toMatchObject({ text: expect.stringContaining('Sanctions Details') });
+    await expect(handler.handleMessage('/check YATAI SMART INDUSTRIAL NEW CITY', 123)).resolves.toMatchObject({ text: expect.stringMatching(/^Debarred/) });
+    await expect(handler.handleMessage('/check Yatai Smart', 123)).resolves.toMatchObject({ text: 'No Data Found!' });
+    await expect(handler.handleMessage('/basic Yatai Smart', 123)).resolves.toMatchObject({ text: 'No Data Found!' });
+    await expect(handler.handleMessage('/full Yatai Smart', 123)).resolves.toMatchObject({ text: 'No Data Found!' });
+  });
+
+  test('search command and no-argument search run fuzzy candidates', async () => {
+    const handler = new BotCommandHandler(await buildService(), createAccessControl('*'));
+
+    await expect(handler.handleMessage('/search Yatai Smart', 123)).resolves.toMatchObject({ text: expect.stringMatching(/^Possible matches/) });
+    await expect(handler.handleMessage('/search HPA-AN CITY', 123)).resolves.toMatchObject({ text: 'No close name candidates found. Try a more complete name.' });
+    await expect(handler.handleMessage('/search', 123)).resolves.toMatchObject({ text: 'Send a name or partial name to search candidates, or /cancel.' });
+    await expect(handler.handleMessage('Yatai Smart', 123)).resolves.toMatchObject({ text: expect.stringMatching(/^Possible matches/) });
   });
 
   test('no-argument check waits for the next text and then clears', async () => {
@@ -387,7 +460,12 @@ describe('access control and pure handlers', () => {
       text: 'Send the complete name to run /check, or /cancel.',
     });
     await expect(handler.handleMessage('YATAI NEW CITY', 123)).resolves.toMatchObject({ text: expect.stringMatching(/^Debarred/) });
-    await expect(handler.handleMessage('YATAI NEW CITY', 123)).resolves.toMatchObject({ text: expect.stringMatching(/^Debarred/) });
+
+    await expect(handler.handleMessage('/check', 123)).resolves.toMatchObject({
+      text: 'Send the complete name to run /check, or /cancel.',
+    });
+    await expect(handler.handleMessage('Yatai Smart', 123)).resolves.toMatchObject({ text: 'No Data Found!' });
+    await expect(handler.handleMessage('YATAI NEW CITY', 123)).resolves.toMatchObject({ text: expect.stringMatching(/^Possible matches/) });
   });
 
   test('no-argument basic and full wait for their own next text', async () => {
@@ -423,7 +501,7 @@ describe('access control and pure handlers', () => {
       text: 'Send the complete name to run /full, or /cancel.',
     });
     await expect(handler.handleMessage('/cancel', 123)).resolves.toMatchObject({ text: 'Cancelled.' });
-    await expect(handler.handleMessage('YATAI NEW CITY', 123)).resolves.toMatchObject({ text: expect.stringMatching(/^Debarred/) });
+    await expect(handler.handleMessage('YATAI NEW CITY', 123)).resolves.toMatchObject({ text: expect.stringMatching(/^Possible matches/) });
   });
 
   test('start clears a pending query mode', async () => {
@@ -432,8 +510,8 @@ describe('access control and pure handlers', () => {
     await expect(handler.handleMessage('/full', 123)).resolves.toMatchObject({
       text: 'Send the complete name to run /full, or /cancel.',
     });
-    await expect(handler.handleStart(123)).resolves.toMatchObject({ text: expect.stringContaining('Send a complete name') });
-    await expect(handler.handleMessage('YATAI NEW CITY', 123)).resolves.toMatchObject({ text: expect.stringMatching(/^Debarred/) });
+    await expect(handler.handleStart(123)).resolves.toMatchObject({ text: expect.stringContaining('Send a name to search candidates') });
+    await expect(handler.handleMessage('YATAI NEW CITY', 123)).resolves.toMatchObject({ text: expect.stringMatching(/^Possible matches/) });
   });
 
   test('callbacks fetch basic/full by record id', async () => {
