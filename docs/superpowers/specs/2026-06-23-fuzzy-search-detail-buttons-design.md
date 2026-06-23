@@ -4,6 +4,8 @@
 
 Add per-candidate detail actions to fuzzy search results in the Telegram debarment lookup bot. A user who runs `/search <name>` or sends plain text should be able to tap `/basic N` or `/full N` for each returned candidate instead of copying the complete name into a separate command.
 
+The fuzzy search result list should show up to 10 candidates.
+
 ## Existing Context
 
 The project already has:
@@ -13,6 +15,7 @@ The project already has:
 - Inline buttons for exact lookup results through `actionButtons`.
 - Callback handling for `basic:<recordId>` and `full:<recordId>`.
 - Record-id lookup methods: `basicByRecordId` and `fullByRecordId`.
+- A current `MAX_RESULTS` setting that caps both exact matches and fuzzy candidates at 5 by default.
 
 The implementation should reuse the existing callback and record-id detail path. Fuzzy search must continue to avoid Debarred verdict language because candidates are suggestions, not exact sanctions determinations.
 
@@ -23,6 +26,8 @@ Return inline buttons from `formatFuzzySearchResult`, one row per candidate:
 ```text
 /basic 1    /full 1
 /basic 2    /full 2
+...
+/basic 10   /full 10
 ```
 
 Each button uses the candidate record id:
@@ -76,12 +81,15 @@ No new callback action is needed. `BotCommandHandler.handleCallback` already acc
 
 ### Service
 
-No service change is needed. Fuzzy candidates already include `basic.recordId`, and the service already supports detail lookup by record id.
+Fuzzy candidates already include `basic.recordId`, and the service already supports detail lookup by record id.
+
+Set the fuzzy search candidate cap to 10 visible candidates. This requirement applies to `/search` and plain-text fuzzy search. Exact `/check`, `/basic`, and `/full` result caps are not part of this feature and should keep their existing behavior unless the implementation plan explicitly identifies the current shared `MAX_RESULTS` setting as the smallest safe way to apply the new search cap.
 
 ## Error Handling
 
 - If fuzzy search finds no candidates, keep the current no-candidate text and return no buttons.
 - If a candidate record id later cannot be resolved, keep the existing callback behavior: the record-id lookup returns `No Data Found!`.
+- If there are more than 10 fuzzy candidates, show 10 candidates, set the truncated notice, and create buttons only for those 10 visible candidates.
 - If output text is truncated by message length limits, the buttons still point to the visible capped candidate list because they are based on `result.candidates`, not on the raw total candidate count.
 
 ## Testing Plan
@@ -91,6 +99,7 @@ Update Vitest coverage for:
 - Fuzzy search formatter returns one button row per candidate.
 - Each candidate row contains `/basic N` and `/full N`.
 - Button callback data uses `basic:<recordId>` and `full:<recordId>`.
+- Fuzzy search returns at most 10 candidates and reports truncation when more candidates exist.
 - Fuzzy misses still return no buttons.
 - Plain text fuzzy search returns detail buttons.
 - Tapping a fuzzy candidate `/basic` callback returns basic information.
@@ -104,4 +113,4 @@ Do not add:
 - A new `/detail` command.
 - A new `detail:<recordId>` callback action.
 - External OpenSanctions hyperlinks beyond the existing `OpenSanctions URL` in basic information.
-- Changes to fuzzy ranking, candidate capping, exact matching, or access control.
+- Changes to fuzzy ranking, exact matching, or access control.
