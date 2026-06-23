@@ -76,7 +76,10 @@ export function formatFuzzySearchResult(result: DebarmentCandidateSearchResult, 
     lines.push(`   Score: ${candidate.score.toFixed(2)} (${candidate.matchReason})`);
   });
 
-  return reply(truncateText(lines.join('\n'), options.maxMessageChars));
+  return {
+    text: truncateText(lines.join('\n'), options.maxMessageChars),
+    buttons: candidateActionButtons(result.candidates),
+  };
 }
 
 export function truncateText(text: string, maxMessageChars = DEFAULT_MAX_MESSAGE_CHARS): string {
@@ -142,6 +145,16 @@ function actionButtons(matches: DebarmentMatch[]): ReplyButton[][] {
     return [
       { text: `/basic${suffix}`, callbackData: `basic:${match.basic.recordId}` },
       { text: `/full${suffix}`, callbackData: `full:${match.basic.recordId}` },
+    ];
+  });
+}
+
+function candidateActionButtons(candidates: DebarmentCandidateSearchResult['candidates']): ReplyButton[][] {
+  return candidates.map((candidate, index) => {
+    const suffix = ` ${index + 1}`;
+    return [
+      { text: `/basic${suffix}`, callbackData: `basic:${candidate.basic.recordId}` },
+      { text: `/full${suffix}`, callbackData: `full:${candidate.basic.recordId}` },
     ];
   });
 }

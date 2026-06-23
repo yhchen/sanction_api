@@ -13,6 +13,7 @@ import type {
 
 export interface DebarmentServiceOptions {
   maxResults?: number;
+  maxCandidateResults?: number;
 }
 
 export interface ActiveDebarmentRepositorySnapshot {
@@ -44,6 +45,7 @@ export class ActiveDebarmentRepositories {
 
 export class DebarmentService {
   private readonly maxResults: number;
+  private readonly maxCandidateResults: number;
   private readonly activeRepositories: ActiveDebarmentRepositories;
 
   constructor(
@@ -53,7 +55,9 @@ export class DebarmentService {
   ) {
     if (senzingRepositoryOrActiveRepositories instanceof ActiveDebarmentRepositories) {
       this.activeRepositories = senzingRepositoryOrActiveRepositories;
-      this.maxResults = Math.max(1, (targetDetailsRepositoryOrOptions as DebarmentServiceOptions | undefined)?.maxResults ?? 5);
+      const resolvedOptions = targetDetailsRepositoryOrOptions as DebarmentServiceOptions | undefined;
+      this.maxResults = Math.max(1, resolvedOptions?.maxResults ?? 5);
+      this.maxCandidateResults = Math.max(1, resolvedOptions?.maxCandidateResults ?? 10);
       return;
     }
 
@@ -68,6 +72,7 @@ export class DebarmentService {
       targetDetailsRepository,
     );
     this.maxResults = Math.max(1, resolvedOptions.maxResults ?? 5);
+    this.maxCandidateResults = Math.max(1, resolvedOptions.maxCandidateResults ?? 10);
   }
 
   async check(name: string): Promise<DebarmentQueryResult> {
@@ -107,7 +112,7 @@ export class DebarmentService {
         .findCandidateNames(name)
         .filter((candidate) => isDebarmentRecord(candidate.record)),
     );
-    const cappedCandidates = allCandidates.slice(0, this.maxResults);
+    const cappedCandidates = allCandidates.slice(0, this.maxCandidateResults);
     return {
       query: name,
       found: allCandidates.length > 0,

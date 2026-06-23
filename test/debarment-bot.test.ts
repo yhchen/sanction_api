@@ -6,7 +6,7 @@ import { normalizeName } from '../src/domain/normalize.js';
 import { ApprovedUsersRepository } from '../src/data/approvedUsersRepository.js';
 import { SenzingMemoryRepository } from '../src/data/senzingMemoryRepository.js';
 import { TargetsNestedMemoryRepository } from '../src/data/targetsNestedMemoryRepository.js';
-import { DebarmentService } from '../src/domain/debarmentService.js';
+import { DebarmentService, type DebarmentServiceOptions } from '../src/domain/debarmentService.js';
 import { formatBasicResults, formatCheckResult, formatFullResults, formatFuzzySearchResult } from '../src/bot/formatters.js';
 import { createAccessControl } from '../src/bot/accessControl.js';
 import { BotCommandHandler } from '../src/bot/handlers.js';
@@ -16,10 +16,10 @@ const fixturesDir = path.join(process.cwd(), 'test/fixtures');
 const senzingFixture = path.join(fixturesDir, 'senzing.fixture.jsonl');
 const targetsFixture = path.join(fixturesDir, 'targets.nested.fixture.jsonl');
 
-async function buildService(maxResults = 5) {
+async function buildService(options: DebarmentServiceOptions = {}) {
   const senzing = await SenzingMemoryRepository.fromFile(senzingFixture);
   const targets = await TargetsNestedMemoryRepository.fromFile(targetsFixture);
-  return new DebarmentService(senzing, targets, { maxResults });
+  return new DebarmentService(senzing, targets, options);
 }
 
 class InMemoryApprovedUsers {
@@ -117,7 +117,7 @@ describe('normalized exact matching', () => {
   });
 
   test('caps fuzzy candidate results and marks truncation', async () => {
-    const service = await buildService(1);
+    const service = await buildService({ maxCandidateResults: 1 });
 
     await expect(service.searchCandidates('DUPLICATE EXACT LIMITED')).resolves.toMatchObject({
       found: true,
@@ -125,6 +125,42 @@ describe('normalized exact matching', () => {
       totalCandidates: 3,
       truncated: true,
     });
+  });
+
+  test('defaults fuzzy candidate cap to 10 without changing exact match cap', async () => {
+    const baseService = await buildService();
+    const duplicateRecord = (await baseService.searchCandidates('DUPLICATE EXACT LIMITED')).candidates[0]?.record;
+    if (!duplicateRecord) throw new Error('Fixture missing duplicate debarment record.');
+
+    const repeatedMatch = { record: duplicateRecord, matchedName: 'DUPLICATE EXACT LIMITED', matchedNameType: 'PRIMARY' };
+    const repository = {
+      findByName: () => Array.from({ length: 12 }, () => repeatedMatch),
+      findCandidateNames: () => Array.from({ length: 12 }, (_, index) => ({
+        record: { ...duplicateRecord, RECORD_ID: `NK-CAP-${index + 1}` },
+        matchedName: `CAP CANDIDATE ${index + 1}`,
+        matchedNameType: 'PRIMARY',
+        score: 0.9,
+        matchReason: 'similar-name',
+      })),
+      findByRecordId: () => undefined,
+      stats: () => ({ records: 12 }),
+    };
+
+    const cappedService = new DebarmentService(repository);
+
+    await expect(cappedService.check('anything')).resolves.toMatchObject({
+      matches: expect.arrayContaining([
+        expect.objectContaining({ basic: expect.objectContaining({ recordId: duplicateRecord.RECORD_ID }) }),
+      ]),
+      totalMatches: 12,
+      truncated: true,
+    });
+    expect((await cappedService.check('anything')).matches).toHaveLength(5);
+
+    const search = await cappedService.searchCandidates('anything');
+    expect(search.candidates).toHaveLength(10);
+    expect(search.totalCandidates).toBe(12);
+    expect(search.truncated).toBe(true);
   });
 });
 
@@ -203,7 +239,7 @@ describe('repositories and debarment service', () => {
   });
 
   test('caps duplicate exact-name results and marks truncation', async () => {
-    const service = await buildService(2);
+    const service = await buildService({ maxResults: 2 });
     const result = await service.check('DUPLICATE EXACT LIMITED');
 
     expect(result.totalMatches).toBe(3);
@@ -216,7 +252,7 @@ describe('formatters', () => {
   let service: DebarmentService;
 
   beforeEach(async () => {
-    service = await buildService(2);
+    service = await buildService({ maxResults: 2 });
   });
 
   test('formats check miss exactly as No Data Found', async () => {
@@ -257,14 +293,23 @@ describe('formatters', () => {
     expect(formatted.text).toMatch(/^Possible matches/);
     expect(formatted.text).toContain('YATAI SMART INDUSTRIAL NEW CITY');
     expect(formatted.text).not.toMatch(/^Debarred/);
+    expect(formatted.buttons).toEqual([
+      [
+        { text: '/basic 1', callbackData: 'basic:NK-223CQDBzp8MRkdJMDiqXn3' },
+        { text: '/full 1', callbackData: 'full:NK-223CQDBzp8MRkdJMDiqXn3' },
+      ],
+    ]);
   });
 
   test('formats fuzzy misses distinctly from exact No Data Found', async () => {
-    expect(formatFuzzySearchResult(await service.searchCandidates('missing')).text).toBe('No close name candidates found. Try a more complete name.');
+    expect(formatFuzzySearchResult(await service.searchCandidates('missing'))).toEqual({
+      text: 'No close name candidates found. Try a more complete name.',
+      buttons: [],
+    });
   });
 
   test('formats capped fuzzy candidate results', async () => {
-    const limitedService = await buildService(1);
+    const limitedService = await buildService({ maxCandidateResults: 1 });
     const formatted = formatFuzzySearchResult(await limitedService.searchCandidates('DUPLICATE EXACT LIMITED'));
 
     expect(formatted.text).toContain('Showing 1 of 3 candidates');
@@ -306,11 +351,15 @@ describe('access control and pure handlers', () => {
 
     await expect(handler.handleMessage('Yatai Smart', 123)).resolves.toMatchObject({
       text: expect.stringMatching(/^Possible matches/),
+      buttons: [[
+        { text: '/basic 1', callbackData: 'basic:NK-223CQDBzp8MRkdJMDiqXn3' },
+        { text: '/full 1', callbackData: 'full:NK-223CQDBzp8MRkdJMDiqXn3' },
+      ]],
     });
     const exactNameReply = await handler.handleMessage('YATAI SMART INDUSTRIAL NEW CITY', 123);
     expect(exactNameReply.text).toMatch(/^Possible matches/);
     expect(exactNameReply.text).not.toMatch(/^Debarred/);
-    expect(exactNameReply.buttons.flat()).toHaveLength(0);
+    expect(exactNameReply.buttons.flat()).toHaveLength(2);
   });
 
   test('unauthorized start shows request instructions and user id', async () => {
@@ -451,6 +500,22 @@ describe('access control and pure handlers', () => {
     await expect(handler.handleMessage('/search HPA-AN CITY', 123)).resolves.toMatchObject({ text: 'No close name candidates found. Try a more complete name.' });
     await expect(handler.handleMessage('/search', 123)).resolves.toMatchObject({ text: 'Send a name or partial name to search candidates, or /cancel.' });
     await expect(handler.handleMessage('Yatai Smart', 123)).resolves.toMatchObject({ text: expect.stringMatching(/^Possible matches/) });
+  });
+
+  test('fuzzy candidate callbacks return basic and full details by record id', async () => {
+    const handler = new BotCommandHandler(await buildService(), createAccessControl('*'));
+    const searchReply = await handler.handleMessage('/search Yatai Smart', 123);
+    const [basicButton, fullButton] = searchReply.buttons[0] ?? [];
+
+    expect(basicButton).toEqual({ text: '/basic 1', callbackData: 'basic:NK-223CQDBzp8MRkdJMDiqXn3' });
+    expect(fullButton).toEqual({ text: '/full 1', callbackData: 'full:NK-223CQDBzp8MRkdJMDiqXn3' });
+
+    await expect(handler.handleCallback(basicButton.callbackData, 123)).resolves.toMatchObject({
+      text: expect.stringContaining('Basic Information'),
+    });
+    await expect(handler.handleCallback(fullButton.callbackData, 123)).resolves.toMatchObject({
+      text: expect.stringContaining('Sanctions Details'),
+    });
   });
 
   test('no-argument check waits for the next text and then clears', async () => {
