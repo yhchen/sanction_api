@@ -17,4 +17,16 @@ describe('package scripts', () => {
 
     expect(packageJson.scripts?.dev).toBe('tsx --env-file=.env.develop src/index.ts');
   });
+
+  test('provides PM2-managed production scripts', async () => {
+    const packageJson = await readPackageJson();
+
+    expect(packageJson.scripts).toMatchObject({
+      'pm2:start': 'npm run build && pm2 startOrReload ecosystem.config.cjs --update-env',
+      'pm2:restart': 'npm run build && pm2 restart ecosystem.config.cjs --update-env',
+      'pm2:stop': 'pm2 stop sanction-api-telegram-bot',
+      'pm2:status': 'pm2 status sanction-api-telegram-bot',
+      'pm2:logs': 'pm2 logs sanction-api-telegram-bot',
+    });
+  });
 });
