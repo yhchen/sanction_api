@@ -82,6 +82,34 @@ npm run build
 node dist/index.js
 ```
 
+PM2 托管方式：
+
+```bash
+cp .env.example .env
+# 编辑 .env，填入 Telegram token、管理员 ID 和数据文件路径
+npm install
+npm install -g pm2
+npm run pm2:start
+pm2 save
+```
+
+PM2 会读取 `ecosystem.config.cjs`，使用 Node.js 20 的 `--env-file=.env` 加载部署配置，并托管运行 `dist/index.js`。常用管理命令：
+
+```bash
+npm run pm2:status
+npm run pm2:logs
+npm run pm2:restart
+npm run pm2:stop
+```
+
+服务器重启后自动恢复 PM2 进程列表，需要按 PM2 对当前系统生成自启动命令：
+
+```bash
+pm2 startup
+```
+
+执行 `pm2 startup` 输出的命令后，再执行 `pm2 save` 保存当前进程列表。
+
 开发方式：
 
 ```bash
