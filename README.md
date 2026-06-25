@@ -11,6 +11,7 @@
 - 支持三种访问控制模式：公开、静态白名单、管理员批准。
 - 未授权用户可发送 `/request` 申请访问；管理员可用 `/approve` 批准。
 - 管理员可手动发送 `/update` 检查 OpenSanctions debarment 数据更新；机器人也会每天 05:00 自动检查。
+- 启动时如果缺少 `senzing.json` 或 `targets.nested.json`，会先自动执行一次数据更新，成功后再启动服务。
 
 ## 数据文件
 
@@ -46,7 +47,7 @@
 
 - Node.js 20 或更高版本。
 - 一个 Telegram Bot Token。
-- 本地数据文件：`senzing.json` 和 `targets.nested.json`。
+- 本地数据文件：`senzing.json` 和 `targets.nested.json`；如果首次启动时缺少这些文件，进程需要能访问 OpenSanctions 下载地址以自动补齐。
 
 安装依赖：
 

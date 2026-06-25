@@ -5,11 +5,18 @@ import { loadConfig } from './config.js';
 import { ApprovedUsersRepository } from './data/approvedUsersRepository.js';
 import { DataRefreshService, scheduleDailyRefresh } from './data/dataRefreshService.js';
 import { SenzingMemoryRepository } from './data/senzingMemoryRepository.js';
+import { ensureDataFilesForStartup } from './data/startupDataService.js';
 import { TargetsNestedMemoryRepository } from './data/targetsNestedMemoryRepository.js';
 import { ActiveDebarmentRepositories, DebarmentService } from './domain/debarmentService.js';
 
 async function main(): Promise<void> {
   const config = loadConfig();
+  await ensureDataFilesForStartup({
+    senzingPath: config.senzingPath,
+    targetsNestedPath: config.targetsNestedPath,
+    refreshMetadataPath: config.refreshMetadataPath,
+  });
+
   console.info('Loading senzing index:', config.senzingPath);
   const senzingRepository = await SenzingMemoryRepository.fromFile(config.senzingPath);
   console.info('Loaded senzing index:', senzingRepository.stats());
