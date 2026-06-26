@@ -80,7 +80,10 @@ export class DataRefreshService {
     try {
       const remoteMetadata = await this.fetchMetadata();
       const localMetadata = await readPersistedMetadata(this.options.refreshMetadataPath);
-      if (metadataChecksumsMatch(localMetadata, remoteMetadata)) {
+      if (metadataChecksumsMatch(localMetadata, remoteMetadata) && await localDataFilesExist({
+        senzingPath: this.options.senzingPath,
+        targetsNestedPath: this.options.targetsNestedPath,
+      })) {
         return { status: 'current', version: remoteMetadata.version, message: `OpenSanctions debarment data is already current (${remoteMetadata.version}).` };
       }
 
@@ -213,6 +216,19 @@ interface ReplaceLocalFilesOptions {
   refreshMetadataPath: string;
   metadata: DatasetMetadata;
   logger?: Pick<Console, 'warn'>;
+}
+
+
+async function localDataFilesExist(options: { senzingPath: string; targetsNestedPath: string }): Promise<boolean> {
+  for (const filePath of [options.senzingPath, options.targetsNestedPath]) {
+    try {
+      await fs.access(filePath);
+    } catch (error: unknown) {
+      if (isNodeError(error) && error.code === 'ENOENT') return false;
+      throw error;
+    }
+  }
+  return true;
 }
 
 async function replaceLocalFilesAndMetadata(options: ReplaceLocalFilesOptions): Promise<void> {

@@ -319,3 +319,68 @@ describe('admin /update handler and scheduler', () => {
     expect(scheduled[1]?.delay).toBe((23 * 60 + 50) * 60 * 1000);
   });
 });
+
+describe('startup data file bootstrap', () => {
+  test('runs a startup update when a required data file is missing', async () => {
+    const { ensureDataFilesForStartup } = await import('../src/data/startupDataService.js');
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'startup-data-'));
+    const senzingPath = path.join(dir, 'senzing.json');
+    const targetsNestedPath = path.join(dir, 'targets.nested.json');
+    const refreshMetadataPath = path.join(dir, 'refresh-metadata.json');
+    await writeJsonl(senzingPath, [oldSenzingRecord]);
+    const refreshNow = vi.fn(async () => {
+      await writeJsonl(targetsNestedPath, [oldTargetRecord]);
+      return { status: 'updated' as const, version: 'v1', message: 'updated' };
+    });
+    const logger = { info: vi.fn(), warn: vi.fn() };
+
+    await expect(ensureDataFilesForStartup({ senzingPath, targetsNestedPath, refreshMetadataPath, refreshNow, logger })).resolves.toMatchObject({ status: 'updated' });
+
+    expect(refreshNow).toHaveBeenCalledTimes(1);
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('missing'), { missingFiles: [targetsNestedPath] });
+  });
+
+  test('does not run a startup update when required data files already exist', async () => {
+    const { ensureDataFilesForStartup } = await import('../src/data/startupDataService.js');
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'startup-data-'));
+    const senzingPath = path.join(dir, 'senzing.json');
+    const targetsNestedPath = path.join(dir, 'targets.nested.json');
+    const refreshMetadataPath = path.join(dir, 'refresh-metadata.json');
+    await writeJsonl(senzingPath, [oldSenzingRecord]);
+    await writeJsonl(targetsNestedPath, [oldTargetRecord]);
+    const refreshNow = vi.fn(async () => ({ status: 'updated' as const, version: 'v1', message: 'updated' }));
+
+    await expect(ensureDataFilesForStartup({ senzingPath, targetsNestedPath, refreshMetadataPath, refreshNow })).resolves.toBeUndefined();
+
+    expect(refreshNow).not.toHaveBeenCalled();
+  });
+
+  test('fails startup when the required update fails', async () => {
+    const { ensureDataFilesForStartup } = await import('../src/data/startupDataService.js');
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'startup-data-'));
+    const senzingPath = path.join(dir, 'senzing.json');
+    const targetsNestedPath = path.join(dir, 'targets.nested.json');
+    const refreshMetadataPath = path.join(dir, 'refresh-metadata.json');
+    const refreshNow = vi.fn(async () => ({ status: 'failed' as const, message: 'Data refresh failed: offline', error: 'offline' }));
+
+    await expect(ensureDataFilesForStartup({ senzingPath, targetsNestedPath, refreshMetadataPath, refreshNow })).rejects.toThrow(/Startup data update failed: offline/u);
+  });
+
+  test('downloads data when metadata is current but a required local data file is missing', async () => {
+    const current = metadata('v1', { senzing: 'old-senzing', targets: 'old-targets' });
+    const harness = await createHarness({
+      localMetadata: current,
+      remoteMetadata: current,
+      downloader: vi.fn(async (url, destination) => {
+        if (url.includes('senzing')) await writeJsonl(destination, [oldSenzingRecord]);
+        else await writeJsonl(destination, [oldTargetRecord]);
+      }),
+    });
+    await fs.rm(harness.targetsNestedPath);
+
+    await expect(harness.refresher.refreshNow()).resolves.toMatchObject({ status: 'updated', version: 'v1' });
+
+    expect(harness.downloader).toHaveBeenCalledTimes(2);
+    await expect(fs.access(harness.targetsNestedPath)).resolves.toBeUndefined();
+  });
+});

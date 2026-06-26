@@ -11,6 +11,7 @@
 - 支持三种访问控制模式：公开、静态白名单、管理员批准。
 - 未授权用户可发送 `/request` 申请访问；管理员可用 `/approve` 批准。
 - 管理员可手动发送 `/update` 检查 OpenSanctions debarment 数据更新；机器人也会每天 05:00 自动检查。
+- 启动时如果缺少 `senzing.json` 或 `targets.nested.json`，会先自动执行一次数据更新，成功后再启动服务。
 
 ## 数据文件
 
@@ -46,7 +47,7 @@
 
 - Node.js 20 或更高版本。
 - 一个 Telegram Bot Token。
-- 本地数据文件：`senzing.json` 和 `targets.nested.json`。
+- 本地数据文件：`senzing.json` 和 `targets.nested.json`；如果首次启动时缺少这些文件，进程需要能访问 OpenSanctions 下载地址以自动补齐。
 
 安装依赖：
 
@@ -81,6 +82,34 @@ export MAX_MESSAGE_CHARS="3800"
 npm run build
 node dist/index.js
 ```
+
+PM2 托管方式：
+
+```bash
+cp .env.example .env
+# 编辑 .env，填入 Telegram token、管理员 ID 和数据文件路径
+npm install
+npm install -g pm2
+npm run pm2:start
+pm2 save
+```
+
+PM2 会读取 `ecosystem.config.cjs`，使用 Node.js 20 的 `--env-file=.env` 加载部署配置，并托管运行 `dist/index.js`。常用管理命令：
+
+```bash
+npm run pm2:status
+npm run pm2:logs
+npm run pm2:restart
+npm run pm2:stop
+```
+
+服务器重启后自动恢复 PM2 进程列表，需要按 PM2 对当前系统生成自启动命令：
+
+```bash
+pm2 startup
+```
+
+执行 `pm2 startup` 输出的命令后，再执行 `pm2 save` 保存当前进程列表。
 
 开发方式：
 
