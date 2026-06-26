@@ -69,6 +69,7 @@ export SENZING_PATH="./senzing.json"
 export TARGETS_NESTED_PATH="./targets.nested.json"
 export REFRESH_METADATA_PATH="./refresh-metadata.json"
 export REFRESH_SCHEDULE_TIME="05:00"
+export MIN_FUZZY_SCORE="0.8"
 export MAX_RESULTS="5"
 export MAX_MESSAGE_CHARS="3800"
 ```
@@ -131,6 +132,7 @@ npm run dev
 | `TARGETS_NESTED_PATH` | `./targets.nested.json` | `targets.nested.json` 数据文件路径。 |
 | `REFRESH_METADATA_PATH` | `./refresh-metadata.json` | 最近一次成功数据刷新的 metadata/checksum 存储路径。运行进程必须有写入权限。 |
 | `REFRESH_SCHEDULE_TIME` | `05:00` | 每日自动刷新检查时间，使用运行服务器本地时区，格式为 `HH:MM`。 |
+| `MIN_FUZZY_SCORE` | `0.8` | 模糊候选搜索的最低分数阈值；低于该分数的候选不会显示。取值范围为 `0` 到 `1`。 |
 | `MAX_RESULTS` | `5` | 单次查询最多返回的匹配数量。 |
 | `MAX_MESSAGE_CHARS` | `3800` | 单条 Telegram 消息的最大输出字符数；不能超过 Telegram 限制。 |
 
@@ -216,6 +218,7 @@ export SENZING_PATH="./senzing.json"
 export TARGETS_NESTED_PATH="./targets.nested.json"
 export REFRESH_METADATA_PATH="./refresh-metadata.json"
 export REFRESH_SCHEDULE_TIME="05:00"
+export MIN_FUZZY_SCORE="0.8"
 export MAX_RESULTS="5"
 export MAX_MESSAGE_CHARS="3800"
 ```

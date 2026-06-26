@@ -16,10 +16,11 @@ const fixturesDir = path.join(process.cwd(), 'test/fixtures');
 const senzingFixture = path.join(fixturesDir, 'senzing.fixture.jsonl');
 const targetsFixture = path.join(fixturesDir, 'targets.nested.fixture.jsonl');
 
-async function buildService(options: DebarmentServiceOptions = {}) {
-  const senzing = await SenzingMemoryRepository.fromFile(senzingFixture);
+async function buildService(options: DebarmentServiceOptions & { minFuzzyScore?: number } = {}) {
+  const { minFuzzyScore = 0.55, ...serviceOptions } = options;
+  const senzing = await SenzingMemoryRepository.fromFile(senzingFixture, { minFuzzyScore });
   const targets = await TargetsNestedMemoryRepository.fromFile(targetsFixture);
-  return new DebarmentService(senzing, targets, options);
+  return new DebarmentService(senzing, targets, serviceOptions);
 }
 
 class InMemoryApprovedUsers {
@@ -249,6 +250,17 @@ describe('repositories and debarment service', () => {
     });
     expect(repo.findCandidateNames('HPA-AN CITY')).toEqual([]);
     expect(repo.findCandidateNames('PW2XZT68KVW9')).toEqual([]);
+  });
+
+  test('filters fuzzy candidates below the configured score threshold', async () => {
+    const strictRepo = await SenzingMemoryRepository.fromFile(senzingFixture, { minFuzzyScore: 0.96 });
+    const relaxedRepo = await SenzingMemoryRepository.fromFile(senzingFixture, { minFuzzyScore: 0.55 });
+
+    expect(strictRepo.findCandidateNames('Yatai Smart')).toEqual([]);
+    expect(relaxedRepo.findCandidateNames('Yatai Smart')[0]).toMatchObject({
+      matchedName: 'YATAI SMART INDUSTRIAL NEW CITY',
+      score: expect.any(Number),
+    });
   });
 
   test('joins targets.nested details for full output', async () => {
@@ -711,6 +723,78 @@ describe('config', () => {
         { requireToken: true },
       ),
     ).toThrow(/MAX_MESSAGE_CHARS/);
+  });
+
+  test('loads fuzzy score threshold config with default and validation', () => {
+    expect(loadConfig({ TELEGRAM_BOT_TOKEN: 'token' }, { requireToken: true })).toMatchObject({
+      minFuzzyScore: 0.8,
+    });
+
+    expect(
+      loadConfig(
+        {
+          TELEGRAM_BOT_TOKEN: 'token',
+          MIN_FUZZY_SCORE: '0.75',
+        },
+        { requireToken: true },
+      ),
+    ).toMatchObject({
+      minFuzzyScore: 0.75,
+    });
+
+    expect(
+      loadConfig(
+        {
+          TELEGRAM_BOT_TOKEN: 'token',
+          MIN_FUZZY_SCORE: ' 1 ',
+        },
+        { requireToken: true },
+      ),
+    ).toMatchObject({
+      minFuzzyScore: 1,
+    });
+
+    expect(
+      loadConfig(
+        {
+          TELEGRAM_BOT_TOKEN: 'token',
+          MIN_FUZZY_SCORE: ' ',
+        },
+        { requireToken: true },
+      ),
+    ).toMatchObject({
+      minFuzzyScore: 0.8,
+    });
+
+    expect(() =>
+      loadConfig(
+        {
+          TELEGRAM_BOT_TOKEN: 'token',
+          MIN_FUZZY_SCORE: '1.1',
+        },
+        { requireToken: true },
+      ),
+    ).toThrow(/MIN_FUZZY_SCORE/);
+
+    expect(() =>
+      loadConfig(
+        {
+          TELEGRAM_BOT_TOKEN: 'token',
+          MIN_FUZZY_SCORE: '-0.1',
+        },
+        { requireToken: true },
+      ),
+    ).toThrow(/MIN_FUZZY_SCORE/);
+
+    expect(() =>
+      loadConfig(
+        {
+          TELEGRAM_BOT_TOKEN: 'token',
+          MIN_FUZZY_SCORE: 'high',
+        },
+        { requireToken: true },
+      ),
+    ).toThrow(/MIN_FUZZY_SCORE/);
   });
 
 
