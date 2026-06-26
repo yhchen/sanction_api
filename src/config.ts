@@ -12,6 +12,7 @@ export interface AppConfig {
   refreshScheduleTime: string;
   maxResults: number;
   maxMessageChars: number;
+  minFuzzyScore: number;
 }
 
 export interface LoadConfigOptions {
@@ -40,6 +41,7 @@ export function loadConfig(
     refreshScheduleTime: scheduleTime(env.REFRESH_SCHEDULE_TIME, '05:00', 'REFRESH_SCHEDULE_TIME'),
     maxResults: positiveInteger(env.MAX_RESULTS, 5, 'MAX_RESULTS'),
     maxMessageChars: boundedPositiveInteger(env.MAX_MESSAGE_CHARS, 3800, 'MAX_MESSAGE_CHARS', TELEGRAM_MAX_MESSAGE_CHARS),
+    minFuzzyScore: boundedNumber(env.MIN_FUZZY_SCORE, 0.8, 'MIN_FUZZY_SCORE', 0, 1),
   };
 }
 
@@ -63,5 +65,14 @@ function positiveInteger(rawValue: string | undefined, defaultValue: number, env
 function boundedPositiveInteger(rawValue: string | undefined, defaultValue: number, envName: string, maxValue: number): number {
   const parsed = positiveInteger(rawValue, defaultValue, envName);
   if (parsed > maxValue) throw new Error(`${envName} must be <= ${maxValue}.`);
+  return parsed;
+}
+
+function boundedNumber(rawValue: string | undefined, defaultValue: number, envName: string, minValue: number, maxValue: number): number {
+  if (rawValue === undefined || rawValue.trim() === '') return defaultValue;
+  const parsed = Number(rawValue.trim());
+  if (!Number.isFinite(parsed) || parsed < minValue || parsed > maxValue) {
+    throw new Error(`${envName} must be a number between ${minValue} and ${maxValue}.`);
+  }
   return parsed;
 }

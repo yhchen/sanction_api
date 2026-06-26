@@ -713,6 +713,78 @@ describe('config', () => {
     ).toThrow(/MAX_MESSAGE_CHARS/);
   });
 
+  test('loads fuzzy score threshold config with default and validation', () => {
+    expect(loadConfig({ TELEGRAM_BOT_TOKEN: 'token' }, { requireToken: true })).toMatchObject({
+      minFuzzyScore: 0.8,
+    });
+
+    expect(
+      loadConfig(
+        {
+          TELEGRAM_BOT_TOKEN: 'token',
+          MIN_FUZZY_SCORE: '0.75',
+        },
+        { requireToken: true },
+      ),
+    ).toMatchObject({
+      minFuzzyScore: 0.75,
+    });
+
+    expect(
+      loadConfig(
+        {
+          TELEGRAM_BOT_TOKEN: 'token',
+          MIN_FUZZY_SCORE: ' 1 ',
+        },
+        { requireToken: true },
+      ),
+    ).toMatchObject({
+      minFuzzyScore: 1,
+    });
+
+    expect(
+      loadConfig(
+        {
+          TELEGRAM_BOT_TOKEN: 'token',
+          MIN_FUZZY_SCORE: ' ',
+        },
+        { requireToken: true },
+      ),
+    ).toMatchObject({
+      minFuzzyScore: 0.8,
+    });
+
+    expect(() =>
+      loadConfig(
+        {
+          TELEGRAM_BOT_TOKEN: 'token',
+          MIN_FUZZY_SCORE: '1.1',
+        },
+        { requireToken: true },
+      ),
+    ).toThrow(/MIN_FUZZY_SCORE/);
+
+    expect(() =>
+      loadConfig(
+        {
+          TELEGRAM_BOT_TOKEN: 'token',
+          MIN_FUZZY_SCORE: '-0.1',
+        },
+        { requireToken: true },
+      ),
+    ).toThrow(/MIN_FUZZY_SCORE/);
+
+    expect(() =>
+      loadConfig(
+        {
+          TELEGRAM_BOT_TOKEN: 'token',
+          MIN_FUZZY_SCORE: 'high',
+        },
+        { requireToken: true },
+      ),
+    ).toThrow(/MIN_FUZZY_SCORE/);
+  });
+
 
   test('loads admin approval config', () => {
     expect(
