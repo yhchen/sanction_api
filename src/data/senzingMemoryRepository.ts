@@ -7,14 +7,23 @@ interface SearchableNameMatch extends SenzingNameMatch {
   normalizedTokens: string[];
 }
 
+export interface SenzingMemoryRepositoryOptions {
+  minFuzzyScore?: number;
+}
+
 export class SenzingMemoryRepository implements SenzingLookupRepository {
   private readonly recordsById = new Map<string, SenzingRecord>();
   private readonly nameIndex = new Map<string, SenzingNameMatch[]>();
   private readonly searchableNames: SearchableNameMatch[] = [];
+  private readonly minFuzzyScore: number;
   private indexedNames = 0;
 
-  static async fromFile(filePath: string): Promise<SenzingMemoryRepository> {
-    const repository = new SenzingMemoryRepository();
+  constructor(options: SenzingMemoryRepositoryOptions = {}) {
+    this.minFuzzyScore = options.minFuzzyScore ?? 0.8;
+  }
+
+  static async fromFile(filePath: string, options: SenzingMemoryRepositoryOptions = {}): Promise<SenzingMemoryRepository> {
+    const repository = new SenzingMemoryRepository(options);
     await readJsonlFile<SenzingRecord>(filePath, (record, lineNumber) => {
       if (!record.RECORD_ID) {
         throw new Error(`Senzing record missing RECORD_ID at line ${lineNumber}`);
@@ -24,8 +33,8 @@ export class SenzingMemoryRepository implements SenzingLookupRepository {
     return repository;
   }
 
-  static fromRecords(records: SenzingRecord[]): SenzingMemoryRepository {
-    const repository = new SenzingMemoryRepository();
+  static fromRecords(records: SenzingRecord[], options: SenzingMemoryRepositoryOptions = {}): SenzingMemoryRepository {
+    const repository = new SenzingMemoryRepository(options);
     for (const record of records) repository.addRecord(record);
     return repository;
   }
@@ -43,7 +52,7 @@ export class SenzingMemoryRepository implements SenzingLookupRepository {
 
     const candidates: SenzingNameCandidate[] = this.searchableNames
       .flatMap((match) => {
-        const score = scoreCandidate(normalizedQuery, queryTokens, match);
+        const score = scoreCandidate(normalizedQuery, queryTokens, match, this.minFuzzyScore);
         return score === undefined
           ? []
           : [{
@@ -100,16 +109,18 @@ export class SenzingMemoryRepository implements SenzingLookupRepository {
   }
 }
 
-const MIN_FUZZY_SCORE = 0.55;
-
 function scoreCandidate(
   normalizedQuery: string,
   queryTokens: string[],
   candidate: SearchableNameMatch,
+  minFuzzyScore: number,
 ): { score: number; matchReason: string } | undefined {
   if (!candidate.normalizedName) return undefined;
   if (candidate.normalizedName === normalizedQuery) return { score: 1, matchReason: 'exact-name-candidate' };
-  if (candidate.normalizedName.includes(normalizedQuery)) return { score: 0.95, matchReason: 'contains-query' };
+  if (candidate.normalizedName.includes(normalizedQuery)) {
+    const score = 0.95;
+    return score < minFuzzyScore ? undefined : { score, matchReason: 'contains-query' };
+  }
 
   const candidateTokens = candidate.normalizedTokens;
   if (queryTokens.length === 0 || candidateTokens.length === 0) return undefined;
@@ -127,7 +138,7 @@ function scoreCandidate(
   const substringCoverage = substringTokenMatches / queryTokens.length;
   const orderBonus = appearsInOrder(queryTokens, candidateTokens) ? 0.08 : 0;
   const score = Math.min(0.94, tokenCoverage * 0.65 + prefixCoverage * 0.20 + substringCoverage * 0.10 + orderBonus);
-  if (score < MIN_FUZZY_SCORE) return undefined;
+  if (score < minFuzzyScore) return undefined;
 
   return {
     score,
