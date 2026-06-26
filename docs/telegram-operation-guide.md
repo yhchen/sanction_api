@@ -62,6 +62,7 @@ SENZING_PATH=./senzing.json
 TARGETS_NESTED_PATH=./targets.nested.json
 REFRESH_METADATA_PATH=./refresh-metadata.json
 REFRESH_SCHEDULE_TIME=05:00
+MIN_FUZZY_SCORE=0.8
 MAX_RESULTS=5
 MAX_MESSAGE_CHARS=3800
 ```
@@ -72,6 +73,7 @@ MAX_MESSAGE_CHARS=3800
 - `ALLOWED_TELEGRAM_USERS`：留空，表示使用管理员批准模式。
 - `ADMIN_TELEGRAM_USERS`：第一次启动时可以先留空，用来获取管理员自己的 Telegram 数字 ID。
 - `APPROVED_TELEGRAM_USERS_PATH`：机器人批准用户后会写入这个 JSON 文件。
+- `MIN_FUZZY_SCORE`：模糊候选搜索最低分数阈值，默认 `0.8`；低于该分数的候选不会显示。
 
 当前项目不会自动加载 `.env`，启动前需要把 `.env` 导入 shell 环境：
 
