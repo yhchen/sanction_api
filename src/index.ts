@@ -43,6 +43,7 @@ async function main(): Promise<void> {
   });
   const handler = new BotCommandHandler(service, accessControl, approvedUsersRepository, {
     maxMessageChars: config.maxMessageChars,
+    telegramBotUsername: config.telegramBotUsername,
   }, dataRefreshService);
   const bot = createBot(config.telegramBotToken, handler);
 

@@ -2,6 +2,7 @@ export const TELEGRAM_MAX_MESSAGE_CHARS = 4096;
 
 export interface AppConfig {
   telegramBotToken: string;
+  telegramBotUsername: string;
   allowedTelegramUsers: string;
   adminTelegramUsers: string;
   approvedTelegramUsersPath: string;
@@ -29,6 +30,7 @@ export function loadConfig(
 
   return {
     telegramBotToken,
+    telegramBotUsername: env.TELEGRAM_BOT_USERNAME?.trim() ?? '',
     allowedTelegramUsers: env.ALLOWED_TELEGRAM_USERS?.trim() ?? '',
     adminTelegramUsers: env.ADMIN_TELEGRAM_USERS?.trim() ?? '',
     approvedTelegramUsersPath: env.APPROVED_TELEGRAM_USERS_PATH?.trim() || './approved-users.json',

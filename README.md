@@ -31,6 +31,7 @@
 - 查询使用规范化后的完整主名称或完整别名精确匹配，来源是 `NAMES[].NAME_FULL`。
 - `/check`、`/basic`、`/full` 使用完整主名称或完整别名精确匹配。例如：`/check YATAI SMART INDUSTRIAL NEW CITY` 和 `/check YATAI NEW CITY` 都可以命中同一条记录，但 `/check Yatai Smart` 不会按部分名称判断为 `Debarred`。
 - `/search <name>` 和无等待模式下的纯文本会执行模糊候选搜索，会在主名称和别名中查找可能匹配的名称候选，不直接判定 `Debarred`。例如：`Yatai Smart` 或 `Myanmar Yatai` 可返回 `YATAI SMART INDUSTRIAL NEW CITY` 候选。
+- 配置 `TELEGRAM_BOT_USERNAME` 后，`/search` 和纯文本模糊搜索结果会在每个候选旁显示 `Full` 链接；点击后通过 Telegram deep link 返回该记录的完整制裁详情。
 - 只有包含风险主题 `debarment` 的记录会返回为 `Debarred`。
 - `/search <name>` 返回按相关性排序且数量受控的候选名称。
 - `/basic <name>` 返回基础记录信息。
@@ -122,6 +123,7 @@ npm run dev
 | 变量 | 默认值 | 说明 |
 | --- | --- | --- |
 | `TELEGRAM_BOT_TOKEN` | 无 | 必填。由 Telegram `@BotFather` 生成的机器人 token。 |
+| `TELEGRAM_BOT_USERNAME` | 空字符串 | Bot 用户名，用于在模糊搜索结果中生成可点击的 `Full` 链接，例如 `ExampleDebarmentBot`。为空时不渲染 deep link。 |
 | `ALLOWED_TELEGRAM_USERS` | 空字符串 | 访问控制白名单。`*` 表示公开；逗号分隔的数字 ID 表示静态白名单；空字符串可配合管理员批准模式。 |
 | `ADMIN_TELEGRAM_USERS` | 空字符串 | 管理员 Telegram 数字用户 ID，多个 ID 用逗号分隔。管理员可批准访问申请。 |
 | `APPROVED_TELEGRAM_USERS_PATH` | `./approved-users.json` | 管理员批准后的用户 ID 存储文件。运行进程必须有写入权限。 |

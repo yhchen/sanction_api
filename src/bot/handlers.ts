@@ -50,7 +50,7 @@ export class BotCommandHandler {
     }
   }
 
-  async handleStart(userId: string | number | undefined): Promise<BotReply> {
+  async handleStart(userId: string | number | undefined, payload = ''): Promise<BotReply> {
     this.clearPendingQuery(userId);
 
     if (!this.accessControl.isAllowed(userId)) {
@@ -60,6 +60,9 @@ export class BotCommandHandler {
         : `Your Telegram user id is ${userId}. Send /request to ask an admin for access.`;
       return textOnly(`Unauthorized. ${suffix}`);
     }
+
+    const fullRecordId = parseFullStartPayload(payload);
+    if (fullRecordId) return formatFullResults(await this.service.fullByRecordId(fullRecordId), this.formatterOptions);
 
     const adminSuffix = this.accessControl.isAdmin(userId) ? ' Admin commands: /approve <telegram_user_id>.' : '';
     return textOnly(`Send a name to search candidates, or use /check, /search, /basic, /full.${adminSuffix}`);
@@ -225,6 +228,13 @@ function parseCommand(message: string): { command: SupportedCommand; argument: s
     command: match[1].toLocaleLowerCase('en-US') as SupportedCommand,
     argument: (match[2] ?? '').trim(),
   };
+}
+
+function parseFullStartPayload(payload: string): string {
+  const trimmed = payload.trim();
+  if (!trimmed.startsWith('full_')) return '';
+  const recordId = trimmed.slice('full_'.length).trim();
+  return /^[A-Za-z0-9_-]{1,59}$/u.test(recordId) ? recordId : '';
 }
 
 function isQueryCommand(command: SupportedCommand): command is QueryCommand {

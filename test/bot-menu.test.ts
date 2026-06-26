@@ -1,5 +1,5 @@
 import { describe, expect, test, vi } from 'vitest';
-import { registerBotCommands, startBot, VISIBLE_BOT_COMMANDS } from '../src/bot/createBot.js';
+import { registerBotCommands, replyOptions, startBot, VISIBLE_BOT_COMMANDS } from '../src/bot/createBot.js';
 
 describe('Telegram command menu registration', () => {
   test('registers only the visible player command menu entries', async () => {
@@ -47,5 +47,11 @@ describe('Telegram command menu registration', () => {
 
     expect(events).toEqual(['setMyCommands']);
     expect(bot.launch).not.toHaveBeenCalled();
+  });
+
+  test('builds Telegram reply options for parse mode without buttons', () => {
+    expect(replyOptions({ text: 'hello', buttons: [], parseMode: 'HTML' })).toEqual({
+      parse_mode: 'HTML',
+    });
   });
 });

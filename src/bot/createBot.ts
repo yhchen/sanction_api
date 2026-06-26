@@ -26,7 +26,8 @@ export function createBot(token: string, handler: BotCommandHandler): Telegraf<C
   const bot = new Telegraf(token);
 
   bot.start(async (ctx) => {
-    await replyToContext(ctx, await handler.handleStart(ctx.from?.id));
+    const payload = 'text' in ctx.message ? ctx.message.text.replace(/^\/start(?:@\w+)?\s*/iu, '').trim() : '';
+    await replyToContext(ctx, await handler.handleStart(ctx.from?.id, payload));
   });
 
   bot.command(['check', 'search', 'basic', 'full', 'request', 'approve', 'update', 'cancel'], async (ctx) => {
@@ -73,17 +74,7 @@ function metadataFromContext(ctx: Context | NarrowedContext<Context, Update>): B
 }
 
 async function replyToContext(ctx: Context | NarrowedContext<Context, Update>, reply: BotReply): Promise<void> {
-  const extra = reply.buttons.length > 0
-    ? {
-        reply_markup: {
-          inline_keyboard: reply.buttons.map((row) =>
-            row.map((button) => ({ text: button.text, callback_data: button.callbackData })),
-          ),
-        },
-      }
-    : undefined;
-
-  await ctx.reply(reply.text, extra);
+  await ctx.reply(reply.text, replyOptions(reply));
 
   for (const notification of reply.notifications ?? []) {
     try {
@@ -92,4 +83,19 @@ async function replyToContext(ctx: Context | NarrowedContext<Context, Update>, r
       console.warn(`Failed to send Telegram notification to ${notification.chatId}:`, error);
     }
   }
+}
+
+export function replyOptions(reply: BotReply): { parse_mode?: 'HTML'; reply_markup?: { inline_keyboard: Array<Array<{ text: string; callback_data: string }>> } } | undefined {
+  if (reply.buttons.length === 0 && !reply.parseMode) return undefined;
+
+  return {
+    parse_mode: reply.parseMode,
+    reply_markup: reply.buttons.length > 0
+      ? {
+          inline_keyboard: reply.buttons.map((row) =>
+            row.map((button) => ({ text: button.text, callback_data: button.callbackData })),
+          ),
+        }
+      : undefined,
+  };
 }

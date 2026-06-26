@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { describe, expect, test } from 'vitest';
+import { loadConfig } from '../src/config.js';
 
 interface PackageJson {
   scripts?: Record<string, string>;
@@ -28,5 +29,14 @@ describe('package scripts', () => {
       'pm2:status': 'pm2 status sanction-api-telegram-bot',
       'pm2:logs': 'pm2 logs sanction-api-telegram-bot',
     });
+  });
+
+  test('loads optional Telegram bot username for deep links', () => {
+    const config = loadConfig({
+      TELEGRAM_BOT_TOKEN: 'token',
+      TELEGRAM_BOT_USERNAME: 'ExampleDebarmentBot',
+    }, { requireToken: true });
+
+    expect(config.telegramBotUsername).toBe('ExampleDebarmentBot');
   });
 });

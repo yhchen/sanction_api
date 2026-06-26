@@ -308,18 +308,26 @@ describe('formatters', () => {
     expect(formatted.text).toContain('Showing 2 of 3 matches');
   });
 
-  test('formats fuzzy candidates without Debarred verdict language', async () => {
-    const formatted = formatFuzzySearchResult(await service.searchCandidates('Yatai Smart'));
+  test('formats fuzzy candidates with row-level full links and no candidate buttons', async () => {
+    const formatted = formatFuzzySearchResult(await service.searchCandidates('Yatai Smart'), {
+      telegramBotUsername: 'ExampleDebarmentBot',
+    });
 
     expect(formatted.text).toMatch(/^Possible matches/);
     expect(formatted.text).toContain('YATAI SMART INDUSTRIAL NEW CITY');
+    expect(formatted.text).toContain('<a href="https://t.me/ExampleDebarmentBot?start=full_NK-223CQDBzp8MRkdJMDiqXn3">Full</a>');
     expect(formatted.text).not.toMatch(/^Debarred/);
-    expect(formatted.buttons).toEqual([
-      [
-        { text: '/basic 1', callbackData: 'basic:NK-223CQDBzp8MRkdJMDiqXn3' },
-        { text: '/full 1', callbackData: 'full:NK-223CQDBzp8MRkdJMDiqXn3' },
-      ],
-    ]);
+    expect(formatted.buttons).toEqual([]);
+    expect(formatted.parseMode).toBe('HTML');
+  });
+
+  test('formats fuzzy candidates without invalid full links when bot username is missing', async () => {
+    const formatted = formatFuzzySearchResult(await service.searchCandidates('Yatai Smart'));
+
+    expect(formatted.text).toContain('YATAI SMART INDUSTRIAL NEW CITY');
+    expect(formatted.text).not.toContain('https://t.me/');
+    expect(formatted.buttons).toEqual([]);
+    expect(formatted.parseMode).toBeUndefined();
   });
 
   test('formats fuzzy misses distinctly from exact No Data Found', async () => {
@@ -372,15 +380,12 @@ describe('access control and pure handlers', () => {
 
     await expect(handler.handleMessage('Yatai Smart', 123)).resolves.toMatchObject({
       text: expect.stringMatching(/^Possible matches/),
-      buttons: [[
-        { text: '/basic 1', callbackData: 'basic:NK-223CQDBzp8MRkdJMDiqXn3' },
-        { text: '/full 1', callbackData: 'full:NK-223CQDBzp8MRkdJMDiqXn3' },
-      ]],
+      buttons: [],
     });
     const exactNameReply = await handler.handleMessage('YATAI SMART INDUSTRIAL NEW CITY', 123);
     expect(exactNameReply.text).toMatch(/^Possible matches/);
     expect(exactNameReply.text).not.toMatch(/^Debarred/);
-    expect(exactNameReply.buttons.flat()).toHaveLength(2);
+    expect(exactNameReply.buttons).toEqual([]);
   });
 
   test('unauthorized start shows request instructions and user id', async () => {
@@ -539,19 +544,34 @@ describe('access control and pure handlers', () => {
     });
   });
 
-  test('fuzzy candidate callbacks return basic and full details by record id', async () => {
+  test('fuzzy candidate search omits callback buttons', async () => {
     const handler = new BotCommandHandler(await buildService(), createAccessControl('*'));
     const searchReply = await handler.handleMessage('/search Yatai Smart', 123);
-    const [basicButton, fullButton] = searchReply.buttons[0] ?? [];
 
-    expect(basicButton).toEqual({ text: '/basic 1', callbackData: 'basic:NK-223CQDBzp8MRkdJMDiqXn3' });
-    expect(fullButton).toEqual({ text: '/full 1', callbackData: 'full:NK-223CQDBzp8MRkdJMDiqXn3' });
+    expect(searchReply.buttons).toEqual([]);
+  });
 
-    await expect(handler.handleCallback(basicButton.callbackData, 123)).resolves.toMatchObject({
-      text: expect.stringContaining('Basic Information'),
-    });
-    await expect(handler.handleCallback(fullButton.callbackData, 123)).resolves.toMatchObject({
+  test('start full deep link returns full details by record id', async () => {
+    const handler = new BotCommandHandler(await buildService(), createAccessControl('*'));
+
+    await expect(handler.handleStart(123, 'full_NK-223CQDBzp8MRkdJMDiqXn3')).resolves.toMatchObject({
       text: expect.stringContaining('Sanctions Details'),
+    });
+  });
+
+  test('start full deep link enforces access control', async () => {
+    const handler = new BotCommandHandler(await buildService(), createAccessControl('456'));
+
+    await expect(handler.handleStart(123, 'full_NK-223CQDBzp8MRkdJMDiqXn3')).resolves.toMatchObject({
+      text: 'Unauthorized.',
+    });
+  });
+
+  test('start ignores malformed full deep link payloads without crashing', async () => {
+    const handler = new BotCommandHandler(await buildService(), createAccessControl('*'));
+
+    await expect(handler.handleStart(123, 'full_')).resolves.toMatchObject({
+      text: expect.stringContaining('Send a name to search candidates'),
     });
   });
 
