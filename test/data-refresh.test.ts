@@ -77,6 +77,7 @@ async function createHarness(options: {
   localMetadata?: DatasetMetadata;
   remoteMetadata?: DatasetMetadata;
   downloader?: RefreshDownloader;
+  minFuzzyScore?: number;
 } = {}) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'data-refresh-'));
   const senzingPath = path.join(dir, 'senzing.json');
@@ -88,7 +89,7 @@ async function createHarness(options: {
     await fs.writeFile(refreshMetadataPath, JSON.stringify(options.localMetadata, null, 2), 'utf8');
   }
   const activeRepositories = new ActiveDebarmentRepositories(
-    await SenzingMemoryRepository.fromFile(senzingPath),
+    await SenzingMemoryRepository.fromFile(senzingPath, { minFuzzyScore: options.minFuzzyScore }),
     await TargetsNestedMemoryRepository.fromFile(targetsNestedPath),
   );
   const service = new DebarmentService(activeRepositories);
@@ -104,6 +105,7 @@ async function createHarness(options: {
     activeRepositories,
     fetchMetadata,
     downloader,
+    minFuzzyScore: options.minFuzzyScore,
     logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
   });
   return { dir, senzingPath, targetsNestedPath, refreshMetadataPath, service, activeRepositories, fetchMetadata, downloader, refresher };
@@ -137,6 +139,25 @@ describe('data refresh service', () => {
     await expect(fs.readFile(harness.senzingPath, 'utf8')).resolves.toContain('NEW PLAYER');
     await expect(fs.readFile(harness.targetsNestedPath, 'utf8')).resolves.toContain('NEW');
     await expect(fs.readFile(harness.refreshMetadataPath, 'utf8')).resolves.toContain('v2');
+  });
+
+  test('uses the configured fuzzy threshold after rebuilding indexes during refresh', async () => {
+    const local = metadata('v1', { senzing: 'old-senzing', targets: 'old-targets' });
+    const remote = metadata('v2', { senzing: 'new-senzing', targets: 'new-targets' });
+    const harness = await createHarness({ localMetadata: local, remoteMetadata: remote, minFuzzyScore: 1 });
+
+    await expect(harness.refresher.refreshNow()).resolves.toMatchObject({ status: 'updated', version: 'v2' });
+
+    await expect(harness.service.searchCandidates('NEW')).resolves.toMatchObject({
+      found: false,
+      candidates: [],
+      totalCandidates: 0,
+      truncated: false,
+    });
+    await expect(harness.service.searchCandidates('NEW PLAYER')).resolves.toMatchObject({
+      found: true,
+      candidates: [{ basic: { recordId: 'new-record' }, score: 1 }],
+    });
   });
 
   test('leaves active indexes and local files unchanged when validation or rebuild fails', async () => {

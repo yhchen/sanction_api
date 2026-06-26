@@ -49,6 +49,7 @@ export interface DataRefreshServiceOptions {
   activeRepositories: ActiveDebarmentRepositories;
   fetchMetadata?: RefreshMetadataFetcher;
   downloader?: RefreshDownloader;
+  minFuzzyScore?: number;
   logger?: Pick<Console, 'info' | 'warn' | 'error'>;
 }
 
@@ -96,7 +97,9 @@ export class DataRefreshService {
       await validateDownloadedResource(stagedSenzingPath, remoteMetadata.resources['senzing.json']);
       await validateDownloadedResource(stagedTargetsPath, remoteMetadata.resources['targets.nested.json']);
 
-      const nextSenzingRepository = await SenzingMemoryRepository.fromFile(stagedSenzingPath);
+      const nextSenzingRepository = await SenzingMemoryRepository.fromFile(stagedSenzingPath, {
+        minFuzzyScore: this.options.minFuzzyScore,
+      });
       const nextTargetsRepository = await TargetsNestedMemoryRepository.fromFile(stagedTargetsPath);
 
       await replaceLocalFilesAndMetadata({

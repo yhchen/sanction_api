@@ -18,7 +18,9 @@ async function main(): Promise<void> {
   });
 
   console.info('Loading senzing index:', config.senzingPath);
-  const senzingRepository = await SenzingMemoryRepository.fromFile(config.senzingPath);
+  const senzingRepository = await SenzingMemoryRepository.fromFile(config.senzingPath, {
+    minFuzzyScore: config.minFuzzyScore,
+  });
   console.info('Loaded senzing index:', senzingRepository.stats());
 
   console.info('Loading targets.nested details:', config.targetsNestedPath);
@@ -40,6 +42,7 @@ async function main(): Promise<void> {
     targetsNestedPath: config.targetsNestedPath,
     refreshMetadataPath: config.refreshMetadataPath,
     activeRepositories,
+    minFuzzyScore: config.minFuzzyScore,
   });
   const handler = new BotCommandHandler(service, accessControl, approvedUsersRepository, {
     maxMessageChars: config.maxMessageChars,
