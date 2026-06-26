@@ -86,13 +86,22 @@ describe('normalized exact matching', () => {
     expect(normalizeName('ＹＡＴＡＩ　ＮＥＷ　ＣＩＴＹ')).toBe(normalizeName('yatai new city'));
   });
 
-  test('matches complete primary or alias names, not partial names', async () => {
+  test('exact lookup matches complete primary names and complete aliases, not partial names', async () => {
     const service = await buildService();
 
     await expect(service.check('YATAI SMART INDUSTRIAL NEW CITY')).resolves.toMatchObject({ found: true });
     await expect(service.check('YATAI NEW CITY')).resolves.toMatchObject({ found: true });
     await expect(service.check('MYANMAR YATAI INTERNATIONAL HOLDING GROUP CO LTD')).resolves.toMatchObject({ found: true });
+    await expect(service.basic('MYANMAR YATAI INTERNATIONAL HOLDING GROUP CO LTD')).resolves.toMatchObject({
+      found: true,
+      matches: [{ basic: { matchedName: 'MYANMAR YATAI INTERNATIONAL HOLDING GROUP CO., LTD.' } }],
+    });
+    await expect(service.full('SHWE KOKKO SPECIAL ECONOMIC ZONE')).resolves.toMatchObject({
+      found: true,
+      matches: [{ basic: { matchedName: 'SHWE KOKKO SPECIAL ECONOMIC ZONE' } }],
+    });
     await expect(service.check('Yatai Smart')).resolves.toMatchObject({ found: false, matches: [] });
+    await expect(service.check('Myanmar Yatai')).resolves.toMatchObject({ found: false, matches: [] });
   });
 
   test('does not report non-debarment exact matches as Debarred', async () => {
@@ -110,7 +119,19 @@ describe('normalized exact matching', () => {
         { basic: { primaryName: 'YATAI SMART INDUSTRIAL NEW CITY' } },
       ],
     });
+    await expect(service.searchCandidates('Myanmar Yatai')).resolves.toMatchObject({
+      found: true,
+      candidates: [
+        {
+          basic: {
+            primaryName: 'YATAI SMART INDUSTRIAL NEW CITY',
+            matchedName: 'MYANMAR YATAI INTERNATIONAL HOLDING GROUP CO., LTD.',
+          },
+        },
+      ],
+    });
     await expect(service.check('Yatai Smart')).resolves.toMatchObject({ found: false, matches: [] });
+    await expect(service.check('Myanmar Yatai')).resolves.toMatchObject({ found: false, matches: [] });
     await expect(service.searchCandidates('HARMLESS SHIPPING LTD')).resolves.toMatchObject({ found: false, candidates: [] });
     await expect(service.searchCandidates('HPA-AN CITY')).resolves.toMatchObject({ found: false, candidates: [] });
     await expect(service.searchCandidates('PW2XZT68KVW9')).resolves.toMatchObject({ found: false, candidates: [] });
@@ -488,18 +509,34 @@ describe('access control and pure handlers', () => {
     await expect(handler.handleMessage('/basic YATAI NEW CITY', 123)).resolves.toMatchObject({ text: expect.stringContaining('Basic Information') });
     await expect(handler.handleMessage('/full YATAI NEW CITY', 123)).resolves.toMatchObject({ text: expect.stringContaining('Sanctions Details') });
     await expect(handler.handleMessage('/check YATAI SMART INDUSTRIAL NEW CITY', 123)).resolves.toMatchObject({ text: expect.stringMatching(/^Debarred/) });
+    await expect(handler.handleMessage('/check MYANMAR YATAI INTERNATIONAL HOLDING GROUP CO LTD', 123)).resolves.toMatchObject({
+      text: expect.stringMatching(/^Debarred/),
+    });
+    await expect(handler.handleMessage('/basic MYANMAR YATAI INTERNATIONAL HOLDING GROUP CO LTD', 123)).resolves.toMatchObject({
+      text: expect.stringContaining('Matched Name: MYANMAR YATAI INTERNATIONAL HOLDING GROUP CO., LTD.'),
+    });
+    await expect(handler.handleMessage('/full SHWE KOKKO SPECIAL ECONOMIC ZONE', 123)).resolves.toMatchObject({
+      text: expect.stringContaining('Sanctions Details'),
+    });
     await expect(handler.handleMessage('/check Yatai Smart', 123)).resolves.toMatchObject({ text: 'No Data Found!' });
     await expect(handler.handleMessage('/basic Yatai Smart', 123)).resolves.toMatchObject({ text: 'No Data Found!' });
     await expect(handler.handleMessage('/full Yatai Smart', 123)).resolves.toMatchObject({ text: 'No Data Found!' });
+    await expect(handler.handleMessage('/check Myanmar Yatai', 123)).resolves.toMatchObject({ text: 'No Data Found!' });
   });
 
   test('search command and no-argument search run fuzzy candidates', async () => {
     const handler = new BotCommandHandler(await buildService(), createAccessControl('*'));
 
     await expect(handler.handleMessage('/search Yatai Smart', 123)).resolves.toMatchObject({ text: expect.stringMatching(/^Possible matches/) });
+    await expect(handler.handleMessage('/search Myanmar Yatai', 123)).resolves.toMatchObject({
+      text: expect.stringContaining('Matched Name: MYANMAR YATAI INTERNATIONAL HOLDING GROUP CO., LTD.'),
+    });
     await expect(handler.handleMessage('/search HPA-AN CITY', 123)).resolves.toMatchObject({ text: 'No close name candidates found. Try a more complete name.' });
     await expect(handler.handleMessage('/search', 123)).resolves.toMatchObject({ text: 'Send a name or partial name to search candidates, or /cancel.' });
     await expect(handler.handleMessage('Yatai Smart', 123)).resolves.toMatchObject({ text: expect.stringMatching(/^Possible matches/) });
+    await expect(handler.handleMessage('Myanmar Yatai', 123)).resolves.toMatchObject({
+      text: expect.stringMatching(/^Possible matches/),
+    });
   });
 
   test('fuzzy candidate callbacks return basic and full details by record id', async () => {
