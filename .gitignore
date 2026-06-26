@@ -16,3 +16,6 @@ refresh-metadata.json
 
 # oh-my-codex
 .omx
+
+# Local agent worktrees
+.worktrees/
