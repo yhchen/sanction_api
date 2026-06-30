@@ -1,4 +1,5 @@
 import { normalizeName } from '../domain/normalize.js';
+import { normalizedTokens, scoreSearchableName } from '../domain/nameScoring.js';
 import type { RepositoryStats, SenzingLookupRepository, SenzingNameCandidate, SenzingNameMatch, SenzingRecord } from '../domain/types.js';
 import { readJsonlFile } from './jsonl.js';
 
@@ -39,11 +40,11 @@ export class SenzingMemoryRepository implements SenzingLookupRepository {
   findCandidateNames(name: string): SenzingNameCandidate[] {
     const normalizedQuery = normalizeName(name);
     if (!normalizedQuery) return [];
-    const queryTokens = tokens(normalizedQuery);
+    const queryTokens = normalizedTokens(normalizedQuery);
 
     const candidates: SenzingNameCandidate[] = this.searchableNames
       .flatMap((match) => {
-        const score = scoreCandidate(normalizedQuery, queryTokens, match);
+        const score = scoreSearchableName(normalizedQuery, queryTokens, match);
         return score === undefined
           ? []
           : [{
@@ -94,57 +95,8 @@ export class SenzingMemoryRepository implements SenzingLookupRepository {
       const match = { record, matchedName: fullName, matchedNameType: name.NAME_TYPE };
       matches.push(match);
       this.nameIndex.set(normalized, matches);
-      this.searchableNames.push({ ...match, normalizedName: normalized, normalizedTokens: tokens(normalized) });
+      this.searchableNames.push({ ...match, normalizedName: normalized, normalizedTokens: normalizedTokens(normalized) });
       this.indexedNames += 1;
     }
   }
-}
-
-const MIN_FUZZY_SCORE = 0.55;
-
-function scoreCandidate(
-  normalizedQuery: string,
-  queryTokens: string[],
-  candidate: SearchableNameMatch,
-): { score: number; matchReason: string } | undefined {
-  if (!candidate.normalizedName) return undefined;
-  if (candidate.normalizedName === normalizedQuery) return { score: 1, matchReason: 'exact-name-candidate' };
-  if (candidate.normalizedName.includes(normalizedQuery)) return { score: 0.95, matchReason: 'contains-query' };
-
-  const candidateTokens = candidate.normalizedTokens;
-  if (queryTokens.length === 0 || candidateTokens.length === 0) return undefined;
-
-  const exactTokenMatches = queryTokens.filter((queryToken) => candidateTokens.includes(queryToken)).length;
-  const prefixTokenMatches = queryTokens.filter((queryToken) =>
-    candidateTokens.some((candidateToken) => candidateToken.startsWith(queryToken) || queryToken.startsWith(candidateToken)),
-  ).length;
-  const substringTokenMatches = queryTokens.filter((queryToken) =>
-    candidateTokens.some((candidateToken) => candidateToken.includes(queryToken) || queryToken.includes(candidateToken)),
-  ).length;
-
-  const tokenCoverage = exactTokenMatches / queryTokens.length;
-  const prefixCoverage = prefixTokenMatches / queryTokens.length;
-  const substringCoverage = substringTokenMatches / queryTokens.length;
-  const orderBonus = appearsInOrder(queryTokens, candidateTokens) ? 0.08 : 0;
-  const score = Math.min(0.94, tokenCoverage * 0.65 + prefixCoverage * 0.20 + substringCoverage * 0.10 + orderBonus);
-  if (score < MIN_FUZZY_SCORE) return undefined;
-
-  return {
-    score,
-    matchReason: exactTokenMatches === queryTokens.length ? 'token-match' : 'similar-name',
-  };
-}
-
-function tokens(normalizedName: string): string[] {
-  return normalizedName.split(' ').filter(Boolean);
-}
-
-function appearsInOrder(queryTokens: string[], candidateTokens: string[]): boolean {
-  let candidateIndex = 0;
-  for (const queryToken of queryTokens) {
-    const nextIndex = candidateTokens.findIndex((candidateToken, index) => index >= candidateIndex && candidateToken.includes(queryToken));
-    if (nextIndex < 0) return false;
-    candidateIndex = nextIndex + 1;
-  }
-  return true;
 }

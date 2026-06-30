@@ -126,6 +126,26 @@ describe('normalized exact matching', () => {
     await expect(service.searchCandidates('PW2XZT68KVW9')).resolves.toMatchObject({ found: false, candidates: [] });
   });
 
+  test('search tolerates small Latin token typos after candidate recall', async () => {
+    const service = await buildService();
+
+    await expect(service.searchCandidates('Yatai Smrat')).resolves.toMatchObject({
+      found: true,
+      candidates: [
+        { basic: { primaryName: 'YATAI SMART INDUSTRIAL NEW CITY' } },
+      ],
+    });
+  });
+
+  test('search does not fuzzy-match identifier-like input through edit distance', async () => {
+    const service = await buildService();
+
+    await expect(service.searchCandidates('PW2XZT68KVW8')).resolves.toMatchObject({
+      found: false,
+      candidates: [],
+    });
+  });
+
   test('caps fuzzy candidate results and marks truncation', async () => {
     const service = await buildService({ maxCandidateResults: 1 });
 
