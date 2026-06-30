@@ -6,6 +6,7 @@
   "description": "Telegram bot for file-backed Debarred lookups over OpenSanctions-derived data.",
   "scripts": {
     "dev": "tsx --env-file=.env.develop src/index.ts",
+    "db:build": "tsx src/scripts/buildSqlite.ts",
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
@@ -15,9 +16,11 @@
     "node": ">=20"
   },
   "dependencies": {
+    "better-sqlite3": "^12.11.1",
     "telegraf": "^4.16.3"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^20.19.0",
     "tsx": "^4.20.3",
     "typescript": "^5.9.3",

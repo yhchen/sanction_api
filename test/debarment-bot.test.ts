@@ -677,4 +677,19 @@ describe('config', () => {
       approvedTelegramUsersPath: './approved-users.json',
     });
   });
+
+  test('loads SQLite path with a local default', () => {
+    expect(loadConfig({ TELEGRAM_BOT_TOKEN: 'token' })).toMatchObject({
+      sqlitePath: './sanction.sqlite',
+    });
+
+    expect(
+      loadConfig({
+        TELEGRAM_BOT_TOKEN: 'token',
+        SQLITE_PATH: './data/custom.sqlite',
+      }),
+    ).toMatchObject({
+      sqlitePath: './data/custom.sqlite',
+    });
+  });
 });

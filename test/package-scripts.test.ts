@@ -17,4 +17,10 @@ describe('package scripts', () => {
 
     expect(packageJson.scripts?.dev).toBe('tsx --env-file=.env.develop src/index.ts');
   });
+
+  test('provides an offline SQLite build script', async () => {
+    const packageJson = await readPackageJson();
+
+    expect(packageJson.scripts?.['db:build']).toBe('tsx src/scripts/buildSqlite.ts');
+  });
 });
