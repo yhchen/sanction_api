@@ -77,4 +77,30 @@ describe('SQLite builder', () => {
       db.close();
     }
   });
+
+  test('leaves the existing SQLite database unchanged when rebuild input is invalid', async () => {
+    const sqlitePath = await tempSqlitePath();
+    const badSenzingPath = path.join(path.dirname(sqlitePath), 'bad-senzing.jsonl');
+    await buildSqliteDatabase({
+      senzingPath: senzingFixture,
+      targetsNestedPath: targetsNestedFixture,
+      sqlitePath,
+    });
+    await fs.writeFile(badSenzingPath, '{"NAMES":[{"NAME_FULL":"BROKEN"}]}\n', 'utf8');
+
+    await expect(buildSqliteDatabase({
+      senzingPath: badSenzingPath,
+      targetsNestedPath: targetsNestedFixture,
+      sqlitePath,
+    })).rejects.toThrow('Senzing record missing RECORD_ID at line 1');
+
+    const db = new Database(sqlitePath, { readonly: true });
+    try {
+      expect(validateSqliteSchema(db)).toBe(true);
+      expect(scalarCount(db, 'SELECT COUNT(*) AS count FROM records')).toBe(5);
+      expect(scalarCount(db, 'SELECT COUNT(*) AS count FROM names')).toBe(8);
+    } finally {
+      db.close();
+    }
+  });
 });

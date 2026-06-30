@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import Database from 'better-sqlite3';
 import { normalizedTokens } from '../domain/nameScoring.js';
 import { normalizeName } from '../domain/normalize.js';
@@ -29,23 +30,74 @@ export async function createEmptySqliteDatabase(sqlitePath: string): Promise<voi
 }
 
 export async function buildSqliteDatabase(options: BuildSqliteDatabaseOptions): Promise<void> {
-  await prepareSqlitePath(options.sqlitePath);
-  const db = new Database(options.sqlitePath);
+  const tempSqlitePath = tempPathFor(options.sqlitePath);
+  await fs.mkdir(path.dirname(options.sqlitePath), { recursive: true });
+  await fs.rm(tempSqlitePath, { force: true });
+
+  const db = new Database(tempSqlitePath);
   try {
     initializeSqliteSchema(db);
-    await insertSenzingRecords(db, options.senzingPath);
-    await insertTargetSanctions(db, options.targetsNestedPath);
-    db.exec('ANALYZE;');
+    await runBuildTransaction(db, options);
 
     if (!validateSqliteSchema(db)) throw new Error('SQLite schema validation failed.');
   } finally {
     db.close();
+  }
+
+  try {
+    await publishSqliteFile(tempSqlitePath, options.sqlitePath);
+  } finally {
+    await fs.rm(tempSqlitePath, { force: true });
   }
 }
 
 async function prepareSqlitePath(sqlitePath: string): Promise<void> {
   await fs.mkdir(path.dirname(sqlitePath), { recursive: true });
   await fs.rm(sqlitePath, { force: true });
+}
+
+function tempPathFor(sqlitePath: string): string {
+  return `${sqlitePath}.tmp-${process.pid}-${Date.now()}-${randomUUID()}`;
+}
+
+async function runBuildTransaction(db: Database.Database, options: BuildSqliteDatabaseOptions): Promise<void> {
+  db.exec('BEGIN IMMEDIATE;');
+  try {
+    await insertSenzingRecords(db, options.senzingPath);
+    await insertTargetSanctions(db, options.targetsNestedPath);
+    db.exec('ANALYZE;');
+    db.exec('COMMIT;');
+  } catch (error) {
+    db.exec('ROLLBACK;');
+    throw error;
+  }
+}
+
+async function publishSqliteFile(tempSqlitePath: string, sqlitePath: string): Promise<void> {
+  const backupPath = tempPathFor(`${sqlitePath}.backup`);
+  let backupCreated = false;
+
+  try {
+    await fs.rename(sqlitePath, backupPath);
+    backupCreated = true;
+  } catch (error) {
+    if (!isMissingFileError(error)) throw error;
+  }
+
+  try {
+    await fs.rename(tempSqlitePath, sqlitePath);
+  } catch (error) {
+    if (backupCreated) {
+      await fs.rename(backupPath, sqlitePath).catch(() => undefined);
+    }
+    throw error;
+  }
+
+  if (backupCreated) await fs.rm(backupPath, { force: true });
+}
+
+function isMissingFileError(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT';
 }
 
 async function insertSenzingRecords(db: Database.Database, senzingPath: string): Promise<void> {
