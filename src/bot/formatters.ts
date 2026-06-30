@@ -6,9 +6,11 @@ export interface FormatterOptions {
 
 const DEFAULT_MAX_MESSAGE_CHARS = 3800;
 const NO_DATA_FOUND = 'No Data Found!';
+const EMPTY_DATA_EXACT = 'Local debarment data is not loaded yet. Data refresh may still be running; try again after the update completes.';
+const EMPTY_DATA_SEARCH = 'Local debarment data is not loaded yet, so candidate search is unavailable. Try again after the update completes.';
 
 export function formatCheckResult(result: DebarmentQueryResult, options: FormatterOptions = {}): BotReply {
-  if (!result.found) return reply(NO_DATA_FOUND);
+  if (!result.found) return reply(result.dataStatus === 'empty' ? EMPTY_DATA_EXACT : NO_DATA_FOUND);
 
   const lines = ['Debarred'];
   appendCapNotice(lines, result);
@@ -63,7 +65,7 @@ export function formatFullResults(result: DebarmentQueryResult, options: Formatt
 }
 
 export function formatFuzzySearchResult(result: DebarmentCandidateSearchResult, options: FormatterOptions = {}): BotReply {
-  if (!result.found) return reply('No close name candidates found. Try a more complete name.');
+  if (!result.found) return reply(result.dataStatus === 'empty' ? EMPTY_DATA_SEARCH : 'No close name candidates found. Try a more complete name.');
 
   const lines = ['Possible matches'];
   if (result.truncated) lines.push(`Showing ${result.candidates.length} of ${result.totalCandidates} candidates. Refine your search if needed.`);

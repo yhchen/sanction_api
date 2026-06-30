@@ -108,6 +108,8 @@ export interface TargetDetailsRepository {
   stats(): RepositoryStats;
 }
 
+export type RepositoryDataStatus = 'ready' | 'empty';
+
 export interface BasicInfo {
   recordId: string;
   primaryName: string;
@@ -135,6 +137,7 @@ export interface DebarmentQueryResult {
   matches: DebarmentMatch[];
   totalMatches: number;
   truncated: boolean;
+  dataStatus?: RepositoryDataStatus;
 }
 
 export interface DebarmentCandidate {
@@ -152,6 +155,7 @@ export interface DebarmentCandidateSearchResult {
   candidates: DebarmentCandidate[];
   totalCandidates: number;
   truncated: boolean;
+  dataStatus?: RepositoryDataStatus;
 }
 
 export interface ReplyButton {

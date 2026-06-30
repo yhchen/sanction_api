@@ -4,6 +4,7 @@ import type {
   DebarmentCandidateSearchResult,
   DebarmentMatch,
   DebarmentQueryResult,
+  RepositoryDataStatus,
   SenzingNameCandidate,
   SenzingNameMatch,
   SenzingRecord,
@@ -101,12 +102,14 @@ export class DebarmentService {
 
   private queryByName(name: string, includeTargetDetails: boolean): DebarmentQueryResult {
     const repositories = this.activeRepositories.snapshot();
+    const dataStatus = repositoryDataStatus(repositories.senzingRepository);
     const allMatches = repositories.senzingRepository.findByName(name).filter((match) => isDebarmentRecord(match.record));
-    return this.materialize(name, allMatches, includeTargetDetails, repositories.targetDetailsRepository);
+    return this.materialize(name, allMatches, includeTargetDetails, repositories.targetDetailsRepository, dataStatus);
   }
 
   private searchCandidateNames(name: string): DebarmentCandidateSearchResult {
     const repositories = this.activeRepositories.snapshot();
+    const dataStatus = repositoryDataStatus(repositories.senzingRepository);
     const allCandidates = uniqueCandidatesByRecord(
       repositories.senzingRepository
         .findCandidateNames(name)
@@ -119,18 +122,20 @@ export class DebarmentService {
       candidates: cappedCandidates.map(toCandidate),
       totalCandidates: allCandidates.length,
       truncated: allCandidates.length > cappedCandidates.length,
+      dataStatus,
     };
   }
 
   private queryByRecordId(recordId: string, includeTargetDetails: boolean): DebarmentQueryResult {
     const repositories = this.activeRepositories.snapshot();
+    const dataStatus = repositoryDataStatus(repositories.senzingRepository);
     const record = repositories.senzingRepository.findByRecordId(recordId);
     if (!record || !isDebarmentRecord(record)) {
-      return emptyResult(recordId);
+      return emptyResult(recordId, dataStatus);
     }
 
     const primaryName = getPrimaryName(record) ?? record.RECORD_ID;
-    return this.materialize(recordId, [{ record, matchedName: primaryName, matchedNameType: 'RECORD_ID' }], includeTargetDetails, repositories.targetDetailsRepository);
+    return this.materialize(recordId, [{ record, matchedName: primaryName, matchedNameType: 'RECORD_ID' }], includeTargetDetails, repositories.targetDetailsRepository, dataStatus);
   }
 
   private materialize(
@@ -138,6 +143,7 @@ export class DebarmentService {
     allMatches: SenzingNameMatch[],
     includeTargetDetails: boolean,
     targetDetailsRepository: TargetDetailsRepository | undefined,
+    dataStatus: RepositoryDataStatus,
   ): DebarmentQueryResult {
     const cappedMatches = allMatches.slice(0, this.maxResults);
     const matches = cappedMatches.map((match): DebarmentMatch => {
@@ -157,6 +163,7 @@ export class DebarmentService {
       matches,
       totalMatches: allMatches.length,
       truncated: allMatches.length > cappedMatches.length,
+      dataStatus,
     };
   }
 }
@@ -177,8 +184,12 @@ function toCandidate(candidate: SenzingNameCandidate): DebarmentCandidate {
   };
 }
 
-function emptyResult(query: string): DebarmentQueryResult {
-  return { query, found: false, matches: [], totalMatches: 0, truncated: false };
+function repositoryDataStatus(repository: SenzingLookupRepository): RepositoryDataStatus {
+  return repository.stats().records === 0 ? 'empty' : 'ready';
+}
+
+function emptyResult(query: string, dataStatus: RepositoryDataStatus = 'ready'): DebarmentQueryResult {
+  return { query, found: false, matches: [], totalMatches: 0, truncated: false, dataStatus };
 }
 
 function isDebarmentRecord(record: SenzingRecord): boolean {

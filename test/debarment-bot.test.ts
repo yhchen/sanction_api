@@ -259,6 +259,17 @@ describe('formatters', () => {
     expect(formatCheckResult(await service.check('missing')).text).toBe('No Data Found!');
   });
 
+  test('formats empty bootstrap exact lookup distinctly from a real miss', () => {
+    expect(formatCheckResult({
+      query: 'ANY NAME',
+      found: false,
+      matches: [],
+      totalMatches: 0,
+      truncated: false,
+      dataStatus: 'empty',
+    }).text).toBe('Local debarment data is not loaded yet. Data refresh may still be running; try again after the update completes.');
+  });
+
   test('formats check hit with Debarred first and basic/full buttons', async () => {
     const formatted = formatCheckResult(await service.check('YATAI NEW CITY'));
 
@@ -306,6 +317,17 @@ describe('formatters', () => {
       text: 'No close name candidates found. Try a more complete name.',
       buttons: [],
     });
+  });
+
+  test('formats empty bootstrap fuzzy search distinctly from a real miss', () => {
+    expect(formatFuzzySearchResult({
+      query: 'ANY NAME',
+      found: false,
+      candidates: [],
+      totalCandidates: 0,
+      truncated: false,
+      dataStatus: 'empty',
+    }).text).toBe('Local debarment data is not loaded yet, so candidate search is unavailable. Try again after the update completes.');
   });
 
   test('formats capped fuzzy candidate results', async () => {
