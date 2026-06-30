@@ -33,7 +33,7 @@ export function formatCheckResult(result: DebarmentQueryResult, options: Formatt
 }
 
 export function formatBasicResults(result: DebarmentQueryResult, options: FormatterOptions = {}): BotReply {
-  if (!result.found) return reply(NO_DATA_FOUND);
+  if (!result.found) return reply(result.dataStatus === 'empty' ? EMPTY_DATA_EXACT : NO_DATA_FOUND);
   const lines: string[] = [];
   appendCapNotice(lines, result);
   result.matches.forEach((match, index) => {
@@ -44,7 +44,7 @@ export function formatBasicResults(result: DebarmentQueryResult, options: Format
 }
 
 export function formatFullResults(result: DebarmentQueryResult, options: FormatterOptions = {}): BotReply {
-  if (!result.found) return reply(NO_DATA_FOUND);
+  if (!result.found) return reply(result.dataStatus === 'empty' ? EMPTY_DATA_EXACT : NO_DATA_FOUND);
   const lines: string[] = [];
   appendCapNotice(lines, result);
   result.matches.forEach((match, index) => {

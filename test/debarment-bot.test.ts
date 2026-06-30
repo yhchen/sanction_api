@@ -15,11 +15,21 @@ import { loadConfig } from '../src/config.js';
 const fixturesDir = path.join(process.cwd(), 'test/fixtures');
 const senzingFixture = path.join(fixturesDir, 'senzing.fixture.jsonl');
 const targetsFixture = path.join(fixturesDir, 'targets.nested.fixture.jsonl');
+const emptyDataExactMessage = 'Local debarment data is not loaded yet. Data refresh may still be running; try again after the update completes.';
+const emptyDataSearchMessage = 'Local debarment data is not loaded yet, so candidate search is unavailable. Try again after the update completes.';
 
 async function buildService(options: DebarmentServiceOptions = {}) {
   const senzing = await SenzingMemoryRepository.fromFile(senzingFixture);
   const targets = await TargetsNestedMemoryRepository.fromFile(targetsFixture);
   return new DebarmentService(senzing, targets, options);
+}
+
+function buildEmptyService(options: DebarmentServiceOptions = {}) {
+  return new DebarmentService(
+    SenzingMemoryRepository.fromRecords([]),
+    TargetsNestedMemoryRepository.fromRecords([]),
+    options,
+  );
 }
 
 class InMemoryApprovedUsers {
@@ -267,7 +277,21 @@ describe('formatters', () => {
       totalMatches: 0,
       truncated: false,
       dataStatus: 'empty',
-    }).text).toBe('Local debarment data is not loaded yet. Data refresh may still be running; try again after the update completes.');
+    }).text).toBe(emptyDataExactMessage);
+  });
+
+  test('formats empty bootstrap basic and full lookup distinctly from a real miss', () => {
+    const emptyResult = {
+      query: 'ANY NAME',
+      found: false,
+      matches: [],
+      totalMatches: 0,
+      truncated: false,
+      dataStatus: 'empty' as const,
+    };
+
+    expect(formatBasicResults(emptyResult).text).toBe(emptyDataExactMessage);
+    expect(formatFullResults(emptyResult).text).toBe(emptyDataExactMessage);
   });
 
   test('formats check hit with Debarred first and basic/full buttons', async () => {
@@ -327,7 +351,7 @@ describe('formatters', () => {
       totalCandidates: 0,
       truncated: false,
       dataStatus: 'empty',
-    }).text).toBe('Local debarment data is not loaded yet, so candidate search is unavailable. Try again after the update completes.');
+    }).text).toBe(emptyDataSearchMessage);
   });
 
   test('formats capped fuzzy candidate results', async () => {
@@ -513,6 +537,15 @@ describe('access control and pure handlers', () => {
     await expect(handler.handleMessage('/check Yatai Smart', 123)).resolves.toMatchObject({ text: 'No Data Found!' });
     await expect(handler.handleMessage('/basic Yatai Smart', 123)).resolves.toMatchObject({ text: 'No Data Found!' });
     await expect(handler.handleMessage('/full Yatai Smart', 123)).resolves.toMatchObject({ text: 'No Data Found!' });
+  });
+
+  test('empty repository commands report bootstrap data status', async () => {
+    const handler = new BotCommandHandler(buildEmptyService(), createAccessControl('*'));
+
+    await expect(handler.handleMessage('/check ANY NAME', 123)).resolves.toMatchObject({ text: emptyDataExactMessage });
+    await expect(handler.handleMessage('/basic ANY NAME', 123)).resolves.toMatchObject({ text: emptyDataExactMessage });
+    await expect(handler.handleMessage('/full ANY NAME', 123)).resolves.toMatchObject({ text: emptyDataExactMessage });
+    await expect(handler.handleMessage('/search ANY NAME', 123)).resolves.toMatchObject({ text: emptyDataSearchMessage });
   });
 
   test('search command and no-argument search run fuzzy candidates', async () => {
