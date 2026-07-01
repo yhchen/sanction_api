@@ -6,6 +6,8 @@ import { pipeline } from 'node:stream/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { SenzingMemoryRepository } from './senzingMemoryRepository.js';
+import { buildSqliteDatabase } from './sqliteBuilder.js';
+import { SqliteSenzingRepository, SqliteTargetDetailsRepository } from './sqliteRepositories.js';
 import { TargetsNestedMemoryRepository } from './targetsNestedMemoryRepository.js';
 import type { ActiveDebarmentRepositories } from '../domain/debarmentService.js';
 import type { SenzingLookupRepository, TargetDetailsRepository } from '../domain/types.js';
@@ -45,6 +47,7 @@ export interface RefreshResult {
 export interface DataRefreshServiceOptions {
   senzingPath: string;
   targetsNestedPath: string;
+  sqlitePath?: string;
   refreshMetadataPath: string;
   activeRepositories: ActiveDebarmentRepositories;
   fetchMetadata?: RefreshMetadataFetcher;
@@ -87,24 +90,55 @@ export class DataRefreshService {
       tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'opensanctions-refresh-'));
       const stagedSenzingPath = path.join(tempDir, 'senzing.json');
       const stagedTargetsPath = path.join(tempDir, 'targets.nested.json');
+      const stagedSqlitePath = this.options.sqlitePath ? path.join(tempDir, 'sanction.sqlite') : undefined;
 
       await this.downloader(remoteMetadata.resources['senzing.json'].url, stagedSenzingPath);
       await this.downloader(remoteMetadata.resources['targets.nested.json'].url, stagedTargetsPath);
       await validateDownloadedResource(stagedSenzingPath, remoteMetadata.resources['senzing.json']);
       await validateDownloadedResource(stagedTargetsPath, remoteMetadata.resources['targets.nested.json']);
 
-      const nextSenzingRepository = await SenzingMemoryRepository.fromFile(stagedSenzingPath);
-      const nextTargetsRepository = await TargetsNestedMemoryRepository.fromFile(stagedTargetsPath);
+      let nextSenzingRepository: SenzingLookupRepository | undefined;
+      let nextTargetsRepository: TargetDetailsRepository | undefined;
+      if (stagedSqlitePath && this.options.sqlitePath) {
+        await buildSqliteDatabase({
+          senzingPath: stagedSenzingPath,
+          targetsNestedPath: stagedTargetsPath,
+          sqlitePath: stagedSqlitePath,
+        });
+        validateSqliteRepositories(stagedSqlitePath);
+      } else {
+        nextSenzingRepository = await SenzingMemoryRepository.fromFile(stagedSenzingPath);
+        nextTargetsRepository = await TargetsNestedMemoryRepository.fromFile(stagedTargetsPath);
+      }
 
       await replaceLocalFilesAndMetadata({
         stagedSenzingPath,
         stagedTargetsPath,
+        stagedSqlitePath,
         senzingPath: this.options.senzingPath,
         targetsNestedPath: this.options.targetsNestedPath,
+        sqlitePath: this.options.sqlitePath,
         refreshMetadataPath: this.options.refreshMetadataPath,
         metadata: remoteMetadata,
         logger: this.logger,
+        afterPublish: this.options.sqlitePath
+          ? async () => {
+              let openedSenzingRepository: SqliteSenzingRepository | undefined;
+              let openedTargetsRepository: SqliteTargetDetailsRepository | undefined;
+              try {
+                openedSenzingRepository = SqliteSenzingRepository.open(this.options.sqlitePath!);
+                openedTargetsRepository = SqliteTargetDetailsRepository.open(this.options.sqlitePath!);
+                nextSenzingRepository = openedSenzingRepository;
+                nextTargetsRepository = openedTargetsRepository;
+              } catch (error) {
+                openedTargetsRepository?.close();
+                openedSenzingRepository?.close();
+                throw error;
+              }
+            }
+          : undefined,
       });
+      if (!nextSenzingRepository || !nextTargetsRepository) throw new Error('Data refresh did not create replacement repositories.');
       this.options.activeRepositories.replace(nextSenzingRepository, nextTargetsRepository);
 
       this.logger.info('OpenSanctions debarment data refreshed.', { version: remoteMetadata.version });
@@ -208,36 +242,49 @@ export function parseDatasetMetadata(raw: unknown): DatasetMetadata {
 interface ReplaceLocalFilesOptions {
   stagedSenzingPath: string;
   stagedTargetsPath: string;
+  stagedSqlitePath?: string;
   senzingPath: string;
   targetsNestedPath: string;
+  sqlitePath?: string;
   refreshMetadataPath: string;
   metadata: DatasetMetadata;
   logger?: Pick<Console, 'warn'>;
+  afterPublish?: () => Promise<void>;
 }
 
 async function replaceLocalFilesAndMetadata(options: ReplaceLocalFilesOptions): Promise<void> {
   await fs.mkdir(path.dirname(options.senzingPath), { recursive: true });
   await fs.mkdir(path.dirname(options.targetsNestedPath), { recursive: true });
+  if (options.sqlitePath) await fs.mkdir(path.dirname(options.sqlitePath), { recursive: true });
   await fs.mkdir(path.dirname(options.refreshMetadataPath), { recursive: true });
 
   const backupSuffix = `.refresh-backup-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   const senzingBackupPath = `${options.senzingPath}${backupSuffix}`;
   const targetsBackupPath = `${options.targetsNestedPath}${backupSuffix}`;
+  const sqliteBackupPath = options.sqlitePath ? `${options.sqlitePath}${backupSuffix}` : undefined;
   const metadataBackupPath = `${options.refreshMetadataPath}${backupSuffix}`;
   const metadataTempPath = `${options.refreshMetadataPath}.tmp-${process.pid}-${Date.now()}`;
   const movedSenzing = await moveIfExists(options.senzingPath, senzingBackupPath);
   const movedTargets = await moveIfExists(options.targetsNestedPath, targetsBackupPath);
+  const copiedSqlite = options.sqlitePath && sqliteBackupPath ? await copyIfExists(options.sqlitePath, sqliteBackupPath) : false;
   const movedMetadata = await moveIfExists(options.refreshMetadataPath, metadataBackupPath);
 
   try {
     await fs.copyFile(options.stagedSenzingPath, options.senzingPath);
     await fs.copyFile(options.stagedTargetsPath, options.targetsNestedPath);
+    if (options.stagedSqlitePath && options.sqlitePath) await fs.copyFile(options.stagedSqlitePath, options.sqlitePath);
     await writePersistedMetadata(metadataTempPath, options.metadata);
     await fs.rename(metadataTempPath, options.refreshMetadataPath);
+    await options.afterPublish?.();
   } catch (error) {
     await removeIfExists(metadataTempPath);
     await removeIfExists(options.senzingPath);
     await removeIfExists(options.targetsNestedPath);
+    if (options.sqlitePath && copiedSqlite && sqliteBackupPath) {
+      await fs.copyFile(sqliteBackupPath, options.sqlitePath);
+    } else if (options.sqlitePath) {
+      await removeIfExists(options.sqlitePath);
+    }
     await removeIfExists(options.refreshMetadataPath);
     if (movedSenzing) await fs.rename(senzingBackupPath, options.senzingPath);
     if (movedTargets) await fs.rename(targetsBackupPath, options.targetsNestedPath);
@@ -245,12 +292,37 @@ async function replaceLocalFilesAndMetadata(options: ReplaceLocalFilesOptions): 
     throw error;
   }
 
-  await removeBackupFiles([senzingBackupPath, targetsBackupPath, metadataBackupPath], options.logger);
+  await removeBackupFiles([senzingBackupPath, targetsBackupPath, metadataBackupPath, sqliteBackupPath].filter(isDefinedString), options.logger);
+}
+
+function isDefinedString(value: string | undefined): value is string {
+  return typeof value === 'string';
+}
+
+function validateSqliteRepositories(sqlitePath: string): void {
+  const senzingRepository = SqliteSenzingRepository.open(sqlitePath);
+  let targetDetailsRepository: SqliteTargetDetailsRepository | undefined;
+  try {
+    targetDetailsRepository = SqliteTargetDetailsRepository.open(sqlitePath);
+  } finally {
+    targetDetailsRepository?.close();
+    senzingRepository.close();
+  }
 }
 
 async function moveIfExists(sourcePath: string, destinationPath: string): Promise<boolean> {
   try {
     await fs.rename(sourcePath, destinationPath);
+    return true;
+  } catch (error: unknown) {
+    if (isNodeError(error) && error.code === 'ENOENT') return false;
+    throw error;
+  }
+}
+
+async function copyIfExists(sourcePath: string, destinationPath: string): Promise<boolean> {
+  try {
+    await fs.copyFile(sourcePath, destinationPath);
     return true;
   } catch (error: unknown) {
     if (isNodeError(error) && error.code === 'ENOENT') return false;

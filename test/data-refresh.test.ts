@@ -8,6 +8,8 @@ import { BotCommandHandler } from '../src/bot/handlers.js';
 import { VISIBLE_BOT_COMMANDS } from '../src/bot/createBot.js';
 import { ActiveDebarmentRepositories, DebarmentService } from '../src/domain/debarmentService.js';
 import { SenzingMemoryRepository } from '../src/data/senzingMemoryRepository.js';
+import { buildSqliteDatabase } from '../src/data/sqliteBuilder.js';
+import { SqliteSenzingRepository, SqliteTargetDetailsRepository } from '../src/data/sqliteRepositories.js';
 import { TargetsNestedMemoryRepository } from '../src/data/targetsNestedMemoryRepository.js';
 import {
   DataRefreshService,
@@ -137,6 +139,78 @@ describe('data refresh service', () => {
     await expect(fs.readFile(harness.senzingPath, 'utf8')).resolves.toContain('NEW PLAYER');
     await expect(fs.readFile(harness.targetsNestedPath, 'utf8')).resolves.toContain('NEW');
     await expect(fs.readFile(harness.refreshMetadataPath, 'utf8')).resolves.toContain('v2');
+  });
+
+  test('builds and swaps SQLite repositories when sqlitePath is configured', async () => {
+    const harness = await createHarness({
+      localMetadata: metadata('v1', { senzing: 'old-senzing', targets: 'old-targets' }),
+      remoteMetadata: metadata('v2', { senzing: 'new-senzing', targets: 'new-targets' }),
+    });
+    const sqlitePath = path.join(harness.dir, 'sanction.sqlite');
+    const refresher = new DataRefreshService({
+      senzingPath: harness.senzingPath,
+      targetsNestedPath: harness.targetsNestedPath,
+      refreshMetadataPath: harness.refreshMetadataPath,
+      sqlitePath,
+      activeRepositories: harness.activeRepositories,
+      fetchMetadata: harness.fetchMetadata,
+      downloader: harness.downloader,
+      logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    });
+
+    await expect(refresher.refreshNow()).resolves.toMatchObject({ status: 'updated', version: 'v2' });
+
+    await expect(harness.service.check('NEW PLAYER')).resolves.toMatchObject({ found: true });
+    const sqliteStats = await fs.stat(sqlitePath);
+    expect(sqliteStats.isFile()).toBe(true);
+    const reopened = SqliteSenzingRepository.open(sqlitePath);
+    try {
+      expect(reopened.findByName('NEW PLAYER')).toHaveLength(1);
+    } finally {
+      reopened.close();
+    }
+  });
+
+  test('refreshes when active repositories are already SQLite-backed', async () => {
+    const harness = await createHarness({
+      localMetadata: metadata('v1', { senzing: 'old-senzing', targets: 'old-targets' }),
+      remoteMetadata: metadata('v2', { senzing: 'new-senzing', targets: 'new-targets' }),
+    });
+    const sqlitePath = path.join(harness.dir, 'sanction.sqlite');
+    await buildSqliteDatabase({
+      senzingPath: harness.senzingPath,
+      targetsNestedPath: harness.targetsNestedPath,
+      sqlitePath,
+    });
+    const oldSenzingRepository = SqliteSenzingRepository.open(sqlitePath);
+    const oldTargetsRepository = SqliteTargetDetailsRepository.open(sqlitePath);
+    const activeRepositories = new ActiveDebarmentRepositories(oldSenzingRepository, oldTargetsRepository);
+    const service = new DebarmentService(activeRepositories);
+    const refresher = new DataRefreshService({
+      senzingPath: harness.senzingPath,
+      targetsNestedPath: harness.targetsNestedPath,
+      refreshMetadataPath: harness.refreshMetadataPath,
+      sqlitePath,
+      activeRepositories,
+      fetchMetadata: harness.fetchMetadata,
+      downloader: harness.downloader,
+      logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    });
+
+    try {
+      await expect(refresher.refreshNow()).resolves.toMatchObject({ status: 'updated', version: 'v2' });
+
+      await expect(service.check('OLD PLAYER')).resolves.toMatchObject({ found: false });
+      await expect(service.check('NEW PLAYER')).resolves.toMatchObject({ found: true });
+    } finally {
+      const snapshot = activeRepositories.snapshot();
+      if (snapshot.senzingRepository !== oldSenzingRepository) (snapshot.senzingRepository as SqliteSenzingRepository).close();
+      if (snapshot.targetDetailsRepository && snapshot.targetDetailsRepository !== oldTargetsRepository) {
+        (snapshot.targetDetailsRepository as SqliteTargetDetailsRepository).close();
+      }
+      oldTargetsRepository.close();
+      oldSenzingRepository.close();
+    }
   });
 
   test('leaves active indexes and local files unchanged when validation or rebuild fails', async () => {

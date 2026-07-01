@@ -38,6 +38,7 @@ async function main(): Promise<void> {
     const dataRefreshService = new DataRefreshService({
       senzingPath: config.senzingPath,
       targetsNestedPath: config.targetsNestedPath,
+      sqlitePath: config.sqlitePath,
       refreshMetadataPath: config.refreshMetadataPath,
       activeRepositories,
     });
