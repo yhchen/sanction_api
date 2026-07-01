@@ -34,17 +34,17 @@ export async function buildSqliteDatabase(options: BuildSqliteDatabaseOptions): 
   await fs.mkdir(path.dirname(options.sqlitePath), { recursive: true });
   await fs.rm(tempSqlitePath, { force: true });
 
-  const db = new Database(tempSqlitePath);
   try {
-    initializeSqliteSchema(db);
-    await runBuildTransaction(db, options);
+    const db = new Database(tempSqlitePath);
+    try {
+      initializeSqliteSchema(db);
+      await runBuildTransaction(db, options);
 
-    if (!validateSqliteSchema(db)) throw new Error('SQLite schema validation failed.');
-  } finally {
-    db.close();
-  }
+      if (!validateSqliteSchema(db)) throw new Error('SQLite schema validation failed.');
+    } finally {
+      db.close();
+    }
 
-  try {
     await publishSqliteFile(tempSqlitePath, options.sqlitePath);
   } finally {
     await fs.rm(tempSqlitePath, { force: true });

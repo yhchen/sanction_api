@@ -110,6 +110,8 @@ describe('SQLite builder', () => {
     } finally {
       db.close();
     }
+
+    expect(await builderTempFiles(sqlitePath)).toEqual([]);
   });
 
   test('leaves the existing SQLite database unchanged when publish cannot replace an open destination', async () => {
