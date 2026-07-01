@@ -10,6 +10,8 @@ import type { SenzingRecord } from '../src/domain/types.js';
 const fixturesDir = path.join(process.cwd(), 'test/fixtures');
 const senzingFixture = path.join(fixturesDir, 'senzing.fixture.jsonl');
 const targetsFixture = path.join(fixturesDir, 'targets.nested.fixture.jsonl');
+const securitiesFixture = path.join(fixturesDir, 'securities.fixture.csv');
+const emptySecuritiesCsv = '"caption","lei","perm_id","isins","ric","countries","sanctioned","eo_14071","public","id","url","datasets","risk_datasets","aliases","referents"\n';
 
 async function buildTempSqlitePath(): Promise<string> {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'sqlite-repositories-'));
@@ -17,6 +19,7 @@ async function buildTempSqlitePath(): Promise<string> {
   await buildSqliteDatabase({
     senzingPath: senzingFixture,
     targetsNestedPath: targetsFixture,
+    securitiesPath: securitiesFixture,
     sqlitePath,
   });
   return sqlitePath;
@@ -38,13 +41,16 @@ async function buildPurposeBuiltSqlite(records: SenzingRecord[]): Promise<string
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'sqlite-repositories-recall-'));
   const senzingPath = path.join(dir, 'senzing.jsonl');
   const targetsPath = path.join(dir, 'targets.nested.jsonl');
+  const securitiesPath = path.join(dir, 'securities.csv');
   const sqlitePath = path.join(dir, 'sanction.sqlite');
 
   await fs.writeFile(senzingPath, `${records.map((record) => JSON.stringify(record)).join('\n')}\n`, 'utf8');
   await fs.writeFile(targetsPath, '', 'utf8');
+  await fs.writeFile(securitiesPath, emptySecuritiesCsv, 'utf8');
   await buildSqliteDatabase({
     senzingPath,
     targetsNestedPath: targetsPath,
+    securitiesPath,
     sqlitePath,
   });
   return sqlitePath;
@@ -92,6 +98,48 @@ describe('SQLite repositories', () => {
       await expect(service.fullByRecordId('NK-223CQDBzp8MRkdJMDiqXn3')).resolves.toMatchObject({
         found: true,
         matches: [{ sanctions: [{ authority: ['OFAC'] }] }],
+      });
+    });
+  });
+
+  test('exact securities-only hit returns sanctioned securities status', async () => {
+    await withSqliteService(async (service) => {
+      await expect(service.check('SECURITIES ONLY LTD')).resolves.toMatchObject({
+        found: true,
+        matches: [{ basic: { recordId: 'NK-SECURITIESONLY', statuses: ['sanctioned_securities'] } }],
+      });
+    });
+  });
+
+  test('same OpenSanctions id merges debarment and securities into one exact result', async () => {
+    await withSqliteService(async (service) => {
+      await expect(service.check('YATAI SMART INDUSTRIAL NEW CITY')).resolves.toMatchObject({
+        found: true,
+        matches: [{
+          basic: {
+            recordId: 'NK-223CQDBzp8MRkdJMDiqXn3',
+            statuses: ['debarred', 'sanctioned_securities'],
+          },
+        }],
+        totalMatches: 1,
+      });
+    });
+  });
+
+  test('fullByRecordId returns securities details', async () => {
+    await withSqliteService(async (service) => {
+      await expect(service.fullByRecordId('NK-SECURITIESONLY')).resolves.toMatchObject({
+        found: true,
+        matches: [{
+          securities: {
+            caption: 'SECURITIES ONLY LTD',
+            lei: ['213800SS45WKYIT4EP89'],
+            permId: ['5063730210'],
+            isins: ['RU000A0JX0J2', 'RU000A0JX0J3'],
+            eo14071: true,
+            public: true,
+          },
+        }],
       });
     });
   });

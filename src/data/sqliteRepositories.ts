@@ -4,6 +4,7 @@ import { normalizeName } from '../domain/normalize.js';
 import type {
   RepositoryStats,
   SanctionDetail,
+  SecuritiesDetail,
   SenzingLookupRepository,
   SenzingNameCandidate,
   SenzingNameMatch,
@@ -26,6 +27,10 @@ interface NameMatchRow extends RecordRow {
 
 interface SanctionsRow {
   sanctions_json: string;
+}
+
+interface SecuritiesRow {
+  securities_json: string;
 }
 
 interface CountRow {
@@ -71,7 +76,7 @@ export class SqliteSenzingRepository implements SenzingLookupRepository {
         n.normalized_tokens_json
       FROM names n
       INNER JOIN records r ON r.record_id = n.record_id
-      WHERE r.is_debarment = 1
+      WHERE (r.is_debarment = 1 OR r.is_sanctioned_securities = 1)
         AND n.normalized_name = ?
       ORDER BY r.record_id, n.name_full
     `).all(normalized) as NameMatchRow[];
@@ -104,7 +109,7 @@ export class SqliteSenzingRepository implements SenzingLookupRepository {
       INNER JOIN names n ON n.id = f.name_id
       INNER JOIN records r ON r.record_id = n.record_id
       WHERE name_fts MATCH ?
-        AND r.is_debarment = 1
+        AND (r.is_debarment = 1 OR r.is_sanctioned_securities = 1)
       ORDER BY r.record_id, n.name_full
     `).all(ftsQuery) as NameMatchRow[];
 
@@ -134,7 +139,7 @@ export class SqliteSenzingRepository implements SenzingLookupRepository {
       SELECT record_id, record_json
       FROM records
       WHERE record_id = ?
-        AND is_debarment = 1
+        AND (is_debarment = 1 OR is_sanctioned_securities = 1)
     `).get(recordId) as RecordRow | undefined;
 
     return row ? parseJson<SenzingRecord>(row.record_json) : undefined;
@@ -171,6 +176,16 @@ export class SqliteTargetDetailsRepository implements TargetDetailsRepository {
     `).get(recordId) as SanctionsRow | undefined;
 
     return row ? parseJson<SanctionDetail[]>(row.sanctions_json) : [];
+  }
+
+  findSecuritiesByRecordId(recordId: string): SecuritiesDetail | undefined {
+    const row = this.db.prepare(`
+      SELECT securities_json
+      FROM securities_details
+      WHERE record_id = ?
+    `).get(recordId) as SecuritiesRow | undefined;
+
+    return row ? parseJson<SecuritiesDetail>(row.securities_json) : undefined;
   }
 
   stats(): RepositoryStats {
