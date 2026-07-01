@@ -264,28 +264,42 @@ async function replaceLocalFilesAndMetadata(options: ReplaceLocalFilesOptions): 
   const sqliteBackupPath = options.sqlitePath ? `${options.sqlitePath}${backupSuffix}` : undefined;
   const metadataBackupPath = `${options.refreshMetadataPath}${backupSuffix}`;
   const metadataTempPath = `${options.refreshMetadataPath}.tmp-${process.pid}-${Date.now()}`;
-  const movedSenzing = await moveIfExists(options.senzingPath, senzingBackupPath);
-  const movedTargets = await moveIfExists(options.targetsNestedPath, targetsBackupPath);
-  const copiedSqlite = options.sqlitePath && sqliteBackupPath ? await copyIfExists(options.sqlitePath, sqliteBackupPath) : false;
-  const movedMetadata = await moveIfExists(options.refreshMetadataPath, metadataBackupPath);
+  let movedSenzing = false;
+  let movedTargets = false;
+  let copiedSqlite = false;
+  let movedMetadata = false;
+  let publishedSenzing = false;
+  let publishedTargets = false;
+  let publishedSqlite = false;
+  let publishedMetadata = false;
 
   try {
+    movedSenzing = await moveIfExists(options.senzingPath, senzingBackupPath);
+    movedTargets = await moveIfExists(options.targetsNestedPath, targetsBackupPath);
+    copiedSqlite = options.sqlitePath && sqliteBackupPath ? await copyIfExists(options.sqlitePath, sqliteBackupPath) : false;
+    movedMetadata = await moveIfExists(options.refreshMetadataPath, metadataBackupPath);
     await fs.copyFile(options.stagedSenzingPath, options.senzingPath);
+    publishedSenzing = true;
     await fs.copyFile(options.stagedTargetsPath, options.targetsNestedPath);
-    if (options.stagedSqlitePath && options.sqlitePath) await fs.copyFile(options.stagedSqlitePath, options.sqlitePath);
+    publishedTargets = true;
+    if (options.stagedSqlitePath && options.sqlitePath) {
+      await fs.copyFile(options.stagedSqlitePath, options.sqlitePath);
+      publishedSqlite = true;
+    }
     await writePersistedMetadata(metadataTempPath, options.metadata);
     await fs.rename(metadataTempPath, options.refreshMetadataPath);
+    publishedMetadata = true;
     await options.afterPublish?.();
   } catch (error) {
     await removeIfExists(metadataTempPath);
-    await removeIfExists(options.senzingPath);
-    await removeIfExists(options.targetsNestedPath);
+    if (movedSenzing || publishedSenzing) await removeIfExists(options.senzingPath);
+    if (movedTargets || publishedTargets) await removeIfExists(options.targetsNestedPath);
     if (options.sqlitePath && copiedSqlite && sqliteBackupPath) {
       await fs.copyFile(sqliteBackupPath, options.sqlitePath);
-    } else if (options.sqlitePath) {
+    } else if (options.sqlitePath && publishedSqlite) {
       await removeIfExists(options.sqlitePath);
     }
-    await removeIfExists(options.refreshMetadataPath);
+    if (movedMetadata || publishedMetadata) await removeIfExists(options.refreshMetadataPath);
     if (movedSenzing) await fs.rename(senzingBackupPath, options.senzingPath);
     if (movedTargets) await fs.rename(targetsBackupPath, options.targetsNestedPath);
     if (movedMetadata) await fs.rename(metadataBackupPath, options.refreshMetadataPath);
