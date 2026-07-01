@@ -8,6 +8,7 @@ import { buildSqliteDatabase, createEmptySqliteDatabase } from '../src/data/sqli
 
 const senzingFixture = path.join(process.cwd(), 'test/fixtures/senzing.fixture.jsonl');
 const targetsNestedFixture = path.join(process.cwd(), 'test/fixtures/targets.nested.fixture.jsonl');
+const securitiesFixture = path.join(process.cwd(), 'test/fixtures/securities.fixture.csv');
 
 interface CountRow {
   count: number;
@@ -47,6 +48,7 @@ describe('SQLite builder', () => {
     await buildSqliteDatabase({
       senzingPath: senzingFixture,
       targetsNestedPath: targetsNestedFixture,
+      securitiesPath: securitiesFixture,
       sqlitePath,
     });
 
@@ -56,15 +58,24 @@ describe('SQLite builder', () => {
       expect(db.prepare('SELECT value FROM schema_metadata WHERE key = ?').get('schema_version') as MetadataRow).toEqual({
         value: SQLITE_SCHEMA_VERSION,
       });
-      expect(scalarCount(db, 'SELECT COUNT(*) AS count FROM records')).toBe(5);
-      expect(scalarCount(db, 'SELECT COUNT(*) AS count FROM names')).toBe(8);
+      expect(scalarCount(db, 'SELECT COUNT(*) AS count FROM records')).toBe(8);
+      expect(scalarCount(db, 'SELECT COUNT(*) AS count FROM names')).toBe(15);
       expect(scalarCount(db, 'SELECT COUNT(*) AS count FROM target_sanctions')).toBe(3);
+      expect(scalarCount(db, 'SELECT COUNT(*) AS count FROM securities_details')).toBe(4);
+      expect(scalarCount(db, 'SELECT COUNT(*) AS count FROM records WHERE is_sanctioned_securities = 1')).toBe(4);
       expect(
         db.prepare('SELECT record_id, name_full, normalized_name FROM names WHERE normalized_name = ?').get('yatai new city') as NameRow | undefined,
       ).toMatchObject({
         record_id: 'NK-223CQDBzp8MRkdJMDiqXn3',
         name_full: 'YATAI NEW CITY',
         normalized_name: 'yatai new city',
+      });
+      expect(
+        db.prepare('SELECT record_id, name_full, normalized_name FROM names WHERE normalized_name = ?').get('securities only ltd') as NameRow | undefined,
+      ).toMatchObject({
+        record_id: 'NK-SECURITIESONLY',
+        name_full: 'SECURITIES ONLY LTD',
+        normalized_name: 'securities only ltd',
       });
       expect(scalarCount(db, "SELECT COUNT(*) AS count FROM name_fts WHERE name_fts MATCH 'yatai'")).toBe(3);
     } finally {
@@ -92,6 +103,7 @@ describe('SQLite builder', () => {
     await buildSqliteDatabase({
       senzingPath: senzingFixture,
       targetsNestedPath: targetsNestedFixture,
+      securitiesPath: securitiesFixture,
       sqlitePath,
     });
     await fs.writeFile(badSenzingPath, '{"NAMES":[{"NAME_FULL":"BROKEN"}]}\n', 'utf8');
@@ -99,14 +111,15 @@ describe('SQLite builder', () => {
     await expect(buildSqliteDatabase({
       senzingPath: badSenzingPath,
       targetsNestedPath: targetsNestedFixture,
+      securitiesPath: securitiesFixture,
       sqlitePath,
     })).rejects.toThrow('Senzing record missing RECORD_ID at line 1');
 
     const db = new Database(sqlitePath, { readonly: true });
     try {
       expect(validateSqliteSchema(db)).toBe(true);
-      expect(scalarCount(db, 'SELECT COUNT(*) AS count FROM records')).toBe(5);
-      expect(scalarCount(db, 'SELECT COUNT(*) AS count FROM names')).toBe(8);
+      expect(scalarCount(db, 'SELECT COUNT(*) AS count FROM records')).toBe(8);
+      expect(scalarCount(db, 'SELECT COUNT(*) AS count FROM names')).toBe(15);
     } finally {
       db.close();
     }
@@ -119,6 +132,7 @@ describe('SQLite builder', () => {
     await buildSqliteDatabase({
       senzingPath: senzingFixture,
       targetsNestedPath: targetsNestedFixture,
+      securitiesPath: securitiesFixture,
       sqlitePath,
     });
 
@@ -127,11 +141,12 @@ describe('SQLite builder', () => {
       await expect(buildSqliteDatabase({
         senzingPath: senzingFixture,
         targetsNestedPath: targetsNestedFixture,
+        securitiesPath: securitiesFixture,
         sqlitePath,
       })).rejects.toThrow();
 
       expect(validateSqliteSchema(openDb)).toBe(true);
-      expect(scalarCount(openDb, 'SELECT COUNT(*) AS count FROM records')).toBe(5);
+      expect(scalarCount(openDb, 'SELECT COUNT(*) AS count FROM records')).toBe(8);
     } finally {
       openDb.close();
     }

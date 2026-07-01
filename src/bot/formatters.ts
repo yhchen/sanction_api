@@ -1,4 +1,13 @@
-import type { BotReply, DebarmentCandidateSearchResult, DebarmentMatch, DebarmentQueryResult, ReplyButton, SanctionDetail } from '../domain/types.js';
+import type {
+  BotReply,
+  DebarmentCandidateSearchResult,
+  DebarmentMatch,
+  DebarmentQueryResult,
+  ReplyButton,
+  SanctionDetail,
+  ScreeningStatus,
+  SecuritiesDetail,
+} from '../domain/types.js';
 
 export interface FormatterOptions {
   maxMessageChars?: number;
@@ -13,7 +22,7 @@ const EMPTY_DATA_SEARCH = 'Local debarment data is not loaded yet, so candidate 
 export function formatCheckResult(result: DebarmentQueryResult, options: FormatterOptions = {}): BotReply {
   if (!result.found) return reply(result.dataStatus === 'empty' ? EMPTY_DATA_EXACT : NO_DATA_FOUND);
 
-  const lines = ['Debarred'];
+  const lines = [result.matches[0] ? statusLine(result.matches[0]) : NO_DATA_FOUND];
   appendCapNotice(lines, result);
   if (result.matches.length > 1) {
     lines.push('', 'Matches:');
@@ -60,6 +69,9 @@ export function formatFullResults(result: DebarmentQueryResult, options: Formatt
       sanctions.forEach((sanction, sanctionIndex) => {
         lines.push(...sanctionSection(sanction, sanctionIndex + 1));
       });
+    }
+    if (match.securities) {
+      lines.push('', ...securitiesSection(match.securities));
     }
   });
   return reply(truncateText(lines.join('\n'), options.maxMessageChars));
@@ -110,6 +122,7 @@ function basicSection(match: DebarmentMatch, index?: number): string[] {
   lines.push(`Record ID: ${match.basic.recordId}`);
   lines.push(`Name: ${match.basic.primaryName}`);
   lines.push(`Matched Name: ${match.basic.matchedName}`);
+  appendInline(lines, 'Statuses', statusLabels(match.basic.statuses));
   appendList(lines, 'Aliases', match.basic.aliases);
   appendInline(lines, 'Topics/Risks', match.basic.risks);
   appendInline(lines, 'Countries', match.basic.countries);
@@ -122,6 +135,14 @@ function basicSection(match: DebarmentMatch, index?: number): string[] {
   return lines;
 }
 
+function statusLine(match: DebarmentMatch): string {
+  return statusLabels(match.basic.statuses).join(' + ') || NO_DATA_FOUND;
+}
+
+function statusLabels(statuses: ScreeningStatus[]): string[] {
+  return statuses.map((status) => (status === 'debarred' ? 'Debarred' : 'Sanctioned Securities'));
+}
+
 function sanctionSection(sanction: SanctionDetail, index: number): string[] {
   const lines = [`- Sanction #${index}: ${sanction.caption ?? sanction.id ?? 'Unnamed sanction'}`];
   appendSanctionField(lines, 'Authority', sanction, 'authority');
@@ -132,6 +153,23 @@ function sanctionSection(sanction: SanctionDetail, index: number): string[] {
   appendSanctionField(lines, 'Provisions', sanction, 'provisions');
   appendSanctionField(lines, 'Source URL', sanction, 'sourceUrl');
   appendSanctionField(lines, 'Summary', sanction, 'summary');
+  return lines;
+}
+
+function securitiesSection(securities: SecuritiesDetail): string[] {
+  const lines = ['Securities Details'];
+  lines.push(`Designated: ${securities.sanctioned ? 'yes' : 'no'}`);
+  lines.push(`Investment Ban: ${securities.eo14071 ? 'yes' : 'no'}`);
+  lines.push(`Public: ${securities.public ? 'yes' : 'no'}`);
+  appendInline(lines, 'LEI', securities.lei);
+  appendInline(lines, 'PermID', securities.permId);
+  appendInline(lines, 'ISINs', securities.isins);
+  appendInline(lines, 'RIC', securities.ric);
+  appendInline(lines, 'Countries', securities.countries);
+  appendInline(lines, 'Datasets', securities.datasets);
+  appendInline(lines, 'Risk Datasets', securities.riskDatasets);
+  appendList(lines, 'Referents', securities.referents);
+  if (securities.url) lines.push(`OpenSanctions URL: ${securities.url}`);
   return lines;
 }
 

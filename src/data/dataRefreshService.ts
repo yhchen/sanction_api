@@ -13,7 +13,8 @@ import type { ActiveDebarmentRepositories } from '../domain/debarmentService.js'
 import type { SenzingLookupRepository, TargetDetailsRepository } from '../domain/types.js';
 
 export const OPENSANCTIONS_DEBARMENT_METADATA_URL = 'https://data.opensanctions.org/datasets/latest/debarment/index.json';
-export const TARGET_RESOURCE_NAMES = ['senzing.json', 'targets.nested.json'] as const;
+export const OPENSANCTIONS_SECURITIES_METADATA_URL = 'https://data.opensanctions.org/datasets/latest/securities/index.json';
+export const TARGET_RESOURCE_NAMES = ['senzing.json', 'targets.nested.json', 'securities.csv'] as const;
 
 export type TargetResourceName = (typeof TARGET_RESOURCE_NAMES)[number];
 
@@ -47,6 +48,7 @@ export interface RefreshResult {
 export interface DataRefreshServiceOptions {
   senzingPath: string;
   targetsNestedPath: string;
+  securitiesPath: string;
   sqlitePath?: string;
   refreshMetadataPath: string;
   activeRepositories: ActiveDebarmentRepositories;
@@ -87,6 +89,7 @@ export class DataRefreshService {
       if (metadataChecksumsMatch(localMetadata, remoteMetadata) && await localRefreshOutputsExist({
         senzingPath: this.options.senzingPath,
         targetsNestedPath: this.options.targetsNestedPath,
+        securitiesPath: this.options.securitiesPath,
         sqlitePath: this.options.sqlitePath,
       })) {
         return { status: 'current', version: remoteMetadata.version, message: `OpenSanctions debarment data is already current (${remoteMetadata.version}).` };
@@ -95,12 +98,15 @@ export class DataRefreshService {
       tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'opensanctions-refresh-'));
       const stagedSenzingPath = path.join(tempDir, 'senzing.json');
       const stagedTargetsPath = path.join(tempDir, 'targets.nested.json');
+      const stagedSecuritiesPath = path.join(tempDir, 'securities.csv');
       const stagedSqlitePath = this.options.sqlitePath ? path.join(tempDir, 'sanction.sqlite') : undefined;
 
       await this.downloader(remoteMetadata.resources['senzing.json'].url, stagedSenzingPath);
       await this.downloader(remoteMetadata.resources['targets.nested.json'].url, stagedTargetsPath);
+      await this.downloader(remoteMetadata.resources['securities.csv'].url, stagedSecuritiesPath);
       await validateDownloadedResource(stagedSenzingPath, remoteMetadata.resources['senzing.json']);
       await validateDownloadedResource(stagedTargetsPath, remoteMetadata.resources['targets.nested.json']);
+      await validateDownloadedResource(stagedSecuritiesPath, remoteMetadata.resources['securities.csv']);
 
       let nextSenzingRepository: SenzingLookupRepository | undefined;
       let nextTargetsRepository: TargetDetailsRepository | undefined;
@@ -108,6 +114,7 @@ export class DataRefreshService {
         await buildSqliteDatabase({
           senzingPath: stagedSenzingPath,
           targetsNestedPath: stagedTargetsPath,
+          securitiesPath: stagedSecuritiesPath,
           sqlitePath: stagedSqlitePath,
         });
         validateSqliteRepositories(stagedSqlitePath);
@@ -121,9 +128,11 @@ export class DataRefreshService {
       await replaceLocalFilesAndMetadata({
         stagedSenzingPath,
         stagedTargetsPath,
+        stagedSecuritiesPath,
         stagedSqlitePath,
         senzingPath: this.options.senzingPath,
         targetsNestedPath: this.options.targetsNestedPath,
+        securitiesPath: this.options.securitiesPath,
         sqlitePath: this.options.sqlitePath,
         refreshMetadataPath: this.options.refreshMetadataPath,
         metadata: remoteMetadata,
@@ -220,19 +229,34 @@ export function nextLocalRunAt(base: Date, timeOfDay: string): Date {
 }
 
 export async function fetchOpenSanctionsDebarmentMetadata(): Promise<DatasetMetadata> {
-  const response = await fetch(OPENSANCTIONS_DEBARMENT_METADATA_URL, { signal: AbortSignal.timeout(DEFAULT_METADATA_TIMEOUT_MS) });
-  if (!response.ok) throw new Error(`Metadata fetch failed with HTTP ${response.status}`);
-  return parseDatasetMetadata(await response.json());
+  const [debarmentResponse, securitiesResponse] = await Promise.all([
+    fetch(OPENSANCTIONS_DEBARMENT_METADATA_URL, { signal: AbortSignal.timeout(DEFAULT_METADATA_TIMEOUT_MS) }),
+    fetch(OPENSANCTIONS_SECURITIES_METADATA_URL, { signal: AbortSignal.timeout(DEFAULT_METADATA_TIMEOUT_MS) }),
+  ]);
+  if (!debarmentResponse.ok) throw new Error(`Debarment metadata fetch failed with HTTP ${debarmentResponse.status}`);
+  if (!securitiesResponse.ok) throw new Error(`Securities metadata fetch failed with HTTP ${securitiesResponse.status}`);
+  const debarment = parseDatasetMetadata(await debarmentResponse.json(), ['senzing.json', 'targets.nested.json']);
+  const securities = parseDatasetMetadata(await securitiesResponse.json(), ['securities.csv']);
+  return {
+    version: `${debarment.version}+${securities.version}`,
+    resources: {
+      ...debarment.resources,
+      ...securities.resources,
+    },
+  };
 }
 
-export function parseDatasetMetadata(raw: unknown): DatasetMetadata {
+export function parseDatasetMetadata(
+  raw: unknown,
+  resourceNames: readonly TargetResourceName[] = TARGET_RESOURCE_NAMES,
+): DatasetMetadata {
   if (!raw || typeof raw !== 'object') throw new Error('OpenSanctions metadata response is not an object.');
   const object = raw as Record<string, unknown>;
   const version = stringValue(object.version);
   if (!version) throw new Error('OpenSanctions metadata is missing dataset version.');
   const rawResources = Array.isArray(object.resources) ? object.resources : [];
   const resources = Object.fromEntries(
-    TARGET_RESOURCE_NAMES.map((name) => {
+    resourceNames.map((name) => {
       const resource = rawResources.find((candidate) => resourceName(candidate) === name);
       if (!resource || typeof resource !== 'object') throw new Error(`OpenSanctions metadata missing ${name}.`);
       const resourceObject = resource as Record<string, unknown>;
@@ -251,9 +275,11 @@ export function parseDatasetMetadata(raw: unknown): DatasetMetadata {
 interface ReplaceLocalFilesOptions {
   stagedSenzingPath: string;
   stagedTargetsPath: string;
+  stagedSecuritiesPath: string;
   stagedSqlitePath?: string;
   senzingPath: string;
   targetsNestedPath: string;
+  securitiesPath: string;
   sqlitePath?: string;
   refreshMetadataPath: string;
   metadata: DatasetMetadata;
@@ -262,8 +288,8 @@ interface ReplaceLocalFilesOptions {
 }
 
 
-async function localRefreshOutputsExist(options: { senzingPath: string; targetsNestedPath: string; sqlitePath?: string }): Promise<boolean> {
-  for (const filePath of [options.senzingPath, options.targetsNestedPath, options.sqlitePath].filter(isDefinedString)) {
+async function localRefreshOutputsExist(options: { senzingPath: string; targetsNestedPath: string; securitiesPath: string; sqlitePath?: string }): Promise<boolean> {
+  for (const filePath of [options.senzingPath, options.targetsNestedPath, options.securitiesPath, options.sqlitePath].filter(isDefinedString)) {
     try {
       const stats = await fs.stat(filePath);
       if (stats.size === 0) return false;
@@ -278,33 +304,40 @@ async function localRefreshOutputsExist(options: { senzingPath: string; targetsN
 async function replaceLocalFilesAndMetadata(options: ReplaceLocalFilesOptions): Promise<void> {
   await fs.mkdir(path.dirname(options.senzingPath), { recursive: true });
   await fs.mkdir(path.dirname(options.targetsNestedPath), { recursive: true });
+  await fs.mkdir(path.dirname(options.securitiesPath), { recursive: true });
   if (options.sqlitePath) await fs.mkdir(path.dirname(options.sqlitePath), { recursive: true });
   await fs.mkdir(path.dirname(options.refreshMetadataPath), { recursive: true });
 
   const backupSuffix = `.refresh-backup-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   const senzingBackupPath = `${options.senzingPath}${backupSuffix}`;
   const targetsBackupPath = `${options.targetsNestedPath}${backupSuffix}`;
+  const securitiesBackupPath = `${options.securitiesPath}${backupSuffix}`;
   const sqliteBackupPath = options.sqlitePath ? `${options.sqlitePath}${backupSuffix}` : undefined;
   const metadataBackupPath = `${options.refreshMetadataPath}${backupSuffix}`;
   const metadataTempPath = `${options.refreshMetadataPath}.tmp-${process.pid}-${Date.now()}`;
   let movedSenzing = false;
   let movedTargets = false;
+  let movedSecurities = false;
   let copiedSqlite = false;
   let movedMetadata = false;
   let publishedSenzing = false;
   let publishedTargets = false;
+  let publishedSecurities = false;
   let publishedSqlite = false;
   let publishedMetadata = false;
 
   try {
     movedSenzing = await moveIfExists(options.senzingPath, senzingBackupPath);
     movedTargets = await moveIfExists(options.targetsNestedPath, targetsBackupPath);
+    movedSecurities = await moveIfExists(options.securitiesPath, securitiesBackupPath);
     copiedSqlite = options.sqlitePath && sqliteBackupPath ? await copyIfExists(options.sqlitePath, sqliteBackupPath) : false;
     movedMetadata = await moveIfExists(options.refreshMetadataPath, metadataBackupPath);
     await fs.copyFile(options.stagedSenzingPath, options.senzingPath);
     publishedSenzing = true;
     await fs.copyFile(options.stagedTargetsPath, options.targetsNestedPath);
     publishedTargets = true;
+    await fs.copyFile(options.stagedSecuritiesPath, options.securitiesPath);
+    publishedSecurities = true;
     if (options.stagedSqlitePath && options.sqlitePath) {
       await fs.copyFile(options.stagedSqlitePath, options.sqlitePath);
       publishedSqlite = true;
@@ -317,6 +350,7 @@ async function replaceLocalFilesAndMetadata(options: ReplaceLocalFilesOptions): 
     await removeIfExists(metadataTempPath);
     if (movedSenzing || publishedSenzing) await removeIfExists(options.senzingPath);
     if (movedTargets || publishedTargets) await removeIfExists(options.targetsNestedPath);
+    if (movedSecurities || publishedSecurities) await removeIfExists(options.securitiesPath);
     if (options.sqlitePath && copiedSqlite && sqliteBackupPath) {
       await fs.copyFile(sqliteBackupPath, options.sqlitePath);
     } else if (options.sqlitePath && publishedSqlite) {
@@ -325,11 +359,12 @@ async function replaceLocalFilesAndMetadata(options: ReplaceLocalFilesOptions): 
     if (movedMetadata || publishedMetadata) await removeIfExists(options.refreshMetadataPath);
     if (movedSenzing) await fs.rename(senzingBackupPath, options.senzingPath);
     if (movedTargets) await fs.rename(targetsBackupPath, options.targetsNestedPath);
+    if (movedSecurities) await fs.rename(securitiesBackupPath, options.securitiesPath);
     if (movedMetadata) await fs.rename(metadataBackupPath, options.refreshMetadataPath);
     throw error;
   }
 
-  await removeBackupFiles([senzingBackupPath, targetsBackupPath, metadataBackupPath, sqliteBackupPath].filter(isDefinedString), options.logger);
+  await removeBackupFiles([senzingBackupPath, targetsBackupPath, securitiesBackupPath, metadataBackupPath, sqliteBackupPath].filter(isDefinedString), options.logger);
 }
 
 function isDefinedString(value: string | undefined): value is string {
@@ -469,7 +504,7 @@ function resourceName(resource: unknown): string {
   const candidates = [object.name, object.title, object.path, object.url].map(stringValue).filter(Boolean);
   for (const candidate of candidates) {
     const basename = path.basename(candidate);
-    if (basename === 'senzing.json' || basename === 'targets.nested.json') return basename;
+    if (basename === 'senzing.json' || basename === 'targets.nested.json' || basename === 'securities.csv') return basename;
   }
   return '';
 }

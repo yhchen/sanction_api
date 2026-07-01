@@ -5,6 +5,7 @@ import type {
   DebarmentMatch,
   DebarmentQueryResult,
   RepositoryDataStatus,
+  ScreeningStatus,
   SenzingNameCandidate,
   SenzingNameMatch,
   SenzingRecord,
@@ -103,7 +104,7 @@ export class DebarmentService {
   private queryByName(name: string, includeTargetDetails: boolean): DebarmentQueryResult {
     const repositories = this.activeRepositories.snapshot();
     const dataStatus = repositoryDataStatus(repositories.senzingRepository);
-    const allMatches = repositories.senzingRepository.findByName(name).filter((match) => isDebarmentRecord(match.record));
+    const allMatches = repositories.senzingRepository.findByName(name).filter((match) => isScreeningRecord(match.record));
     return this.materialize(name, allMatches, includeTargetDetails, repositories.targetDetailsRepository, dataStatus);
   }
 
@@ -113,7 +114,7 @@ export class DebarmentService {
     const allCandidates = uniqueCandidatesByRecord(
       repositories.senzingRepository
         .findCandidateNames(name)
-        .filter((candidate) => isDebarmentRecord(candidate.record)),
+        .filter((candidate) => isScreeningRecord(candidate.record)),
     );
     const cappedCandidates = allCandidates.slice(0, this.maxCandidateResults);
     return {
@@ -130,7 +131,7 @@ export class DebarmentService {
     const repositories = this.activeRepositories.snapshot();
     const dataStatus = repositoryDataStatus(repositories.senzingRepository);
     const record = repositories.senzingRepository.findByRecordId(recordId);
-    if (!record || !isDebarmentRecord(record)) {
+    if (!record || !isScreeningRecord(record)) {
       return emptyResult(recordId, dataStatus);
     }
 
@@ -150,10 +151,14 @@ export class DebarmentService {
       const sanctions = includeTargetDetails
         ? (targetDetailsRepository?.findSanctionsByRecordId(match.record.RECORD_ID) ?? [])
         : [];
+      const securities = includeTargetDetails
+        ? targetDetailsRepository?.findSecuritiesByRecordId(match.record.RECORD_ID)
+        : undefined;
       return {
         ...match,
         basic: toBasicInfo(match),
         sanctions,
+        securities,
       };
     });
 
@@ -192,8 +197,16 @@ function emptyResult(query: string, dataStatus: RepositoryDataStatus = 'ready'):
   return { query, found: false, matches: [], totalMatches: 0, truncated: false, dataStatus };
 }
 
-function isDebarmentRecord(record: SenzingRecord): boolean {
-  return (record.RISKS ?? []).some((risk) => risk.TOPIC?.trim().toLocaleLowerCase('en-US') === 'debarment');
+function screeningStatuses(record: SenzingRecord): ScreeningStatus[] {
+  const topics = new Set((record.RISKS ?? []).map((risk) => risk.TOPIC?.trim().toLocaleLowerCase('en-US')).filter(Boolean));
+  const statuses: ScreeningStatus[] = [];
+  if (topics.has('debarment')) statuses.push('debarred');
+  if (topics.has('sanctioned_securities')) statuses.push('sanctioned_securities');
+  return statuses;
+}
+
+function isScreeningRecord(record: SenzingRecord): boolean {
+  return screeningStatuses(record).length > 0;
 }
 
 function toBasicInfo(match: SenzingNameMatch): BasicInfo {
@@ -205,6 +218,7 @@ function toBasicInfo(match: SenzingNameMatch): BasicInfo {
     primaryName,
     matchedName: match.matchedName,
     matchedNameType: match.matchedNameType,
+    statuses: screeningStatuses(record),
     aliases: unique(
       (record.NAMES ?? [])
         .filter((name) => name.NAME_FULL && name.NAME_FULL !== primaryName)

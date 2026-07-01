@@ -8,6 +8,7 @@ export interface AppConfig {
   approvedTelegramUsersPath: string;
   senzingPath: string;
   targetsNestedPath: string;
+  securitiesPath: string;
   sqlitePath: string;
   refreshMetadataPath: string;
   refreshScheduleTime: string;
@@ -38,6 +39,7 @@ export function loadConfig(
     approvedTelegramUsersPath: env.APPROVED_TELEGRAM_USERS_PATH?.trim() || './approved-users.json',
     senzingPath: env.SENZING_PATH?.trim() || './senzing.json',
     targetsNestedPath: env.TARGETS_NESTED_PATH?.trim() || './targets.nested.json',
+    securitiesPath: env.SECURITIES_PATH?.trim() || './securities.csv',
     sqlitePath: env.SQLITE_PATH?.trim() || './sanction.sqlite',
     refreshMetadataPath: env.REFRESH_METADATA_PATH?.trim() || './refresh-metadata.json',
     refreshScheduleTime: scheduleTime(env.REFRESH_SCHEDULE_TIME, '05:00', 'REFRESH_SCHEDULE_TIME'),

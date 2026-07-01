@@ -7,6 +7,7 @@ import { SqliteSenzingRepository } from '../src/data/sqliteRepositories.js';
 
 const senzingFixture = path.join(process.cwd(), 'test/fixtures/senzing.fixture.jsonl');
 const targetsNestedFixture = path.join(process.cwd(), 'test/fixtures/targets.nested.fixture.jsonl');
+const securitiesFixture = path.join(process.cwd(), 'test/fixtures/securities.fixture.csv');
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -15,6 +16,7 @@ afterEach(() => {
 interface BootstrapPaths {
   senzingPath: string;
   targetsNestedPath: string;
+  securitiesPath: string;
   sqlitePath: string;
 }
 
@@ -23,6 +25,7 @@ async function tempBootstrapPaths(): Promise<BootstrapPaths> {
   return {
     senzingPath: path.join(dir, 'nested', 'senzing.json'),
     targetsNestedPath: path.join(dir, 'nested', 'targets.nested.json'),
+    securitiesPath: path.join(dir, 'nested', 'securities.csv'),
     sqlitePath: path.join(dir, 'nested', 'sanction.sqlite'),
   };
 }
@@ -37,6 +40,7 @@ describe('SQLite bootstrap', () => {
       expect(result.senzingRepository.stats()).toEqual({ records: 0, indexedNames: 0 });
       expect(await fs.readFile(paths.senzingPath, 'utf8')).toBe('');
       expect(await fs.readFile(paths.targetsNestedPath, 'utf8')).toBe('');
+      expect(await fs.readFile(paths.securitiesPath, 'utf8')).toBe('');
     } finally {
       result.close();
     }
@@ -47,11 +51,12 @@ describe('SQLite bootstrap', () => {
     await fs.mkdir(path.dirname(paths.senzingPath), { recursive: true });
     await fs.copyFile(senzingFixture, paths.senzingPath);
     await fs.copyFile(targetsNestedFixture, paths.targetsNestedPath);
+    await fs.copyFile(securitiesFixture, paths.securitiesPath);
 
     const result = await bootstrapSqliteRepositories(paths);
     try {
       expect(result.shouldAutoRefresh).toBe(false);
-      expect(result.senzingRepository.stats().records).toBe(5);
+      expect(result.senzingRepository.stats().records).toBe(8);
     } finally {
       result.close();
     }
@@ -62,11 +67,12 @@ describe('SQLite bootstrap', () => {
     await fs.mkdir(path.dirname(paths.senzingPath), { recursive: true });
     await fs.copyFile(senzingFixture, paths.senzingPath);
     await fs.copyFile(targetsNestedFixture, paths.targetsNestedPath);
+    await fs.copyFile(securitiesFixture, paths.securitiesPath);
 
     const bootstrapResult = await bootstrapSqliteRepositories(paths);
     const directRepository = SqliteSenzingRepository.open(paths.sqlitePath);
     try {
-      expect(bootstrapResult.senzingRepository.stats()).toEqual({ records: 5, indexedNames: 8 });
+      expect(bootstrapResult.senzingRepository.stats()).toEqual({ records: 8, indexedNames: 15 });
       expect(directRepository.stats()).toEqual(bootstrapResult.senzingRepository.stats());
     } finally {
       directRepository.close();
@@ -87,11 +93,12 @@ describe('SQLite bootstrap', () => {
 
     await fs.copyFile(senzingFixture, paths.senzingPath);
     await fs.copyFile(targetsNestedFixture, paths.targetsNestedPath);
+    await fs.copyFile(securitiesFixture, paths.securitiesPath);
 
     const populatedResult = await bootstrapSqliteRepositories(paths);
     try {
       expect(populatedResult.shouldAutoRefresh).toBe(false);
-      expect(populatedResult.senzingRepository.stats().records).toBe(5);
+      expect(populatedResult.senzingRepository.stats().records).toBe(8);
     } finally {
       populatedResult.close();
     }
@@ -103,6 +110,15 @@ describe('SQLite bootstrap', () => {
     await fs.copyFile(senzingFixture, paths.senzingPath);
 
     await expect(bootstrapSqliteRepositories(paths)).rejects.toThrow(`Missing startup data file: ${paths.targetsNestedPath}`);
+  });
+
+  test('throws when securities CSV is missing from populated startup data', async () => {
+    const paths = await tempBootstrapPaths();
+    await fs.mkdir(path.dirname(paths.senzingPath), { recursive: true });
+    await fs.copyFile(senzingFixture, paths.senzingPath);
+    await fs.copyFile(targetsNestedFixture, paths.targetsNestedPath);
+
+    await expect(bootstrapSqliteRepositories(paths)).rejects.toThrow(`Missing startup data file: ${paths.securitiesPath}`);
   });
 
   test('throws when targets.nested JSONL exists but senzing JSONL is missing with an empty SQLite database', async () => {
@@ -120,12 +136,13 @@ describe('SQLite bootstrap', () => {
     await fs.mkdir(path.dirname(paths.senzingPath), { recursive: true });
     await fs.copyFile(senzingFixture, paths.senzingPath);
     await fs.copyFile(targetsNestedFixture, paths.targetsNestedPath);
+    await fs.copyFile(securitiesFixture, paths.securitiesPath);
     await fs.writeFile(paths.sqlitePath, 'not a sqlite database', 'utf8');
 
     const result = await bootstrapSqliteRepositories(paths);
     try {
       expect(result.shouldAutoRefresh).toBe(false);
-      expect(result.senzingRepository.stats().records).toBe(5);
+      expect(result.senzingRepository.stats().records).toBe(8);
     } finally {
       result.close();
     }
@@ -142,6 +159,7 @@ describe('SQLite bootstrap', () => {
       expect(result.senzingRepository.stats()).toEqual({ records: 0, indexedNames: 0 });
       expect(await fs.readFile(paths.senzingPath, 'utf8')).toBe('');
       expect(await fs.readFile(paths.targetsNestedPath, 'utf8')).toBe('');
+      expect(await fs.readFile(paths.securitiesPath, 'utf8')).toBe('');
     } finally {
       result.close();
     }
@@ -152,6 +170,7 @@ describe('SQLite bootstrap', () => {
     await fs.mkdir(path.dirname(paths.senzingPath), { recursive: true });
     await fs.writeFile(paths.senzingPath, '', 'utf8');
     await fs.writeFile(paths.targetsNestedPath, '', 'utf8');
+    await fs.writeFile(paths.securitiesPath, '', 'utf8');
 
     const result = await bootstrapSqliteRepositories(paths);
     try {
@@ -167,6 +186,7 @@ describe('SQLite bootstrap', () => {
     await fs.mkdir(path.dirname(paths.senzingPath), { recursive: true });
     await fs.writeFile(paths.senzingPath, '', 'utf8');
     await fs.writeFile(paths.targetsNestedPath, '', 'utf8');
+    await fs.writeFile(paths.securitiesPath, '', 'utf8');
     await fs.writeFile(paths.sqlitePath, 'not a sqlite database', 'utf8');
 
     const result = await bootstrapSqliteRepositories(paths);
@@ -184,6 +204,7 @@ describe('SQLite bootstrap', () => {
     writeFile.mockImplementationOnce(async () => {
       await fs.copyFile(senzingFixture, paths.senzingPath);
       await fs.copyFile(targetsNestedFixture, paths.targetsNestedPath);
+      await fs.copyFile(securitiesFixture, paths.securitiesPath);
       const error = new Error('file already exists') as NodeJS.ErrnoException;
       error.code = 'EEXIST';
       throw error;
@@ -192,7 +213,7 @@ describe('SQLite bootstrap', () => {
     const result = await bootstrapSqliteRepositories(paths);
     try {
       expect(result.shouldAutoRefresh).toBe(false);
-      expect(result.senzingRepository.stats()).toEqual({ records: 5, indexedNames: 8 });
+      expect(result.senzingRepository.stats()).toEqual({ records: 8, indexedNames: 15 });
     } finally {
       result.close();
     }

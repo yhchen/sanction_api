@@ -80,6 +80,24 @@ export interface SanctionDetail {
   summary: string[];
 }
 
+export type ScreeningStatus = 'debarred' | 'sanctioned_securities';
+
+export interface SecuritiesDetail {
+  caption: string;
+  lei: string[];
+  permId: string[];
+  isins: string[];
+  ric: string[];
+  countries: string[];
+  sanctioned: boolean;
+  eo14071: boolean;
+  public: boolean;
+  datasets: string[];
+  riskDatasets: string[];
+  referents: string[];
+  url?: string;
+}
+
 export interface SenzingNameMatch {
   record: SenzingRecord;
   matchedName: string;
@@ -105,6 +123,7 @@ export interface SenzingLookupRepository {
 
 export interface TargetDetailsRepository {
   findSanctionsByRecordId(recordId: string): SanctionDetail[];
+  findSecuritiesByRecordId(recordId: string): SecuritiesDetail | undefined;
   stats(): RepositoryStats;
 }
 
@@ -115,6 +134,7 @@ export interface BasicInfo {
   primaryName: string;
   matchedName: string;
   matchedNameType?: string | null;
+  statuses: ScreeningStatus[];
   aliases: string[];
   risks: string[];
   countries: string[];
@@ -129,6 +149,7 @@ export interface DebarmentMatch {
   matchedNameType?: string | null;
   basic: BasicInfo;
   sanctions: SanctionDetail[];
+  securities?: SecuritiesDetail;
 }
 
 export interface DebarmentQueryResult {
