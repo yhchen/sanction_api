@@ -34,6 +34,7 @@ cd /Users/ethanchan/dev/finance/sanction_api
 - 本地数据文件：
   - `senzing.json`
   - `targets.nested.json`
+  - `securities.csv`
 - 可写的批准用户存储文件路径，例如 `./approved-users.json`。
 
 安装依赖：
@@ -61,6 +62,7 @@ ADMIN_TELEGRAM_USERS=
 APPROVED_TELEGRAM_USERS_PATH=./approved-users.json
 SENZING_PATH=./senzing.json
 TARGETS_NESTED_PATH=./targets.nested.json
+SECURITIES_PATH=./securities.csv
 SQLITE_PATH=./sanction.sqlite
 REFRESH_METADATA_PATH=./refresh-metadata.json
 REFRESH_SCHEDULE_TIME=05:00
@@ -77,7 +79,7 @@ MAX_MESSAGE_CHARS=3800
 - `ADMIN_TELEGRAM_USERS`：第一次启动时可以先留空，用来获取管理员自己的 Telegram 数字 ID。
 - `APPROVED_TELEGRAM_USERS_PATH`：机器人批准用户后会写入这个 JSON 文件。
 - `MIN_FUZZY_SCORE`：模糊候选搜索最低分数阈值，默认 `0.8`；低于该分数的候选不会显示。
-- `SQLITE_PATH`：SQLite 查询库路径；启动和刷新时会从 JSONL 数据构建或替换该文件。
+- `SQLITE_PATH`：SQLite 查询库路径；启动和刷新时会从 JSONL/CSV 数据构建或替换该文件。
 
 当前项目不会自动加载 `.env`，启动前需要把 `.env` 导入 shell 环境：
 
@@ -147,7 +149,7 @@ node dist/index.js
 机器人启动时会自动向 Telegram 注册命令菜单，不需要在 `@BotFather` 中手工配置。菜单中只显示以下快速指令：
 
 - `/start` - 显示帮助和访问状态
-- `/check` - 查询完整主名称或完整别名的 Debarred 状态
+- `/check` - 查询完整主名称或完整别名的 Debarred / Sanctioned Securities 状态
 - `/search` - 按主名称或别名的部分输入搜索候选
 - `/basic` - 显示基础记录信息
 - `/full` - 显示完整制裁详情
@@ -187,7 +189,7 @@ node dist/index.js
 
 - 用户 ID 会写入 `approved-users.json`。
 - 用户会收到访问已开通的通知。
-- 用户可以开始查询 Debarred 信息。
+- 用户可以开始查询 Debarred 和 Sanctioned Securities 公司级信息。
 
 ## 9. 用户查询方式
 
@@ -214,7 +216,8 @@ node dist/index.js
 - `/check`、`/basic`、`/full` 必须输入完整主名称或完整别名并保持精确匹配。
 - `/search` 和无等待模式下的普通文本支持主名称或别名的部分输入做模糊候选搜索。
 - 模糊候选搜索只搜索 `NAMES[].NAME_FULL`，不搜索地址、编号或制裁详情全文。
-- 模糊候选搜索只返回可能匹配的名称候选，不直接显示为 `Debarred`。只有精确查询命中的、风险主题包含 `debarment` 的记录会显示为 `Debarred`。
+- 模糊候选搜索只返回可能匹配的名称候选，不直接显示为命中结论。
+- 精确查询结果现在可能显示 `Debarred`、`Sanctioned Securities` 或 `Debarred + Sanctioned Securities`。Sanctioned Securities 当前使用 OpenSanctions 官方 `securities.csv` 公司级导出，不是完整 securities 图谱。
 
 ## 10. 管理员数据刷新
 
@@ -224,17 +227,18 @@ node dist/index.js
 /update
 ```
 
-该命令不会出现在公开命令菜单中，也不会开放给普通用户。机器人会使用 OpenSanctions debarment metadata endpoint 检查目标资源：
+该命令不会出现在公开命令菜单中，也不会开放给普通用户。机器人会使用 OpenSanctions debarment metadata 和 securities metadata endpoint 检查目标资源：
 
 ```text
 https://data.opensanctions.org/datasets/latest/debarment/index.json
+https://data.opensanctions.org/datasets/latest/securities/index.json
 ```
 
 安全刷新规则：
 
-- 先比较远端 `senzing.json` 和 `targets.nested.json` checksum 与本地 `REFRESH_METADATA_PATH`。
+- 先比较远端 `senzing.json`、`targets.nested.json` 和 `securities.csv` checksum 与本地 `REFRESH_METADATA_PATH`。
 - checksum 未变化时，不下载完整文件，直接回复数据已是最新。
-- 任一目标文件变化时，从同一 metadata version 下载两个文件到临时路径。
+- 任一目标文件变化时，下载三份文件到临时路径。
 - 下载后先验证，并在临时目录构建 SQLite 查询库；成功后才替换本地文件、写入 metadata，并热切换查询数据。
 - metadata 获取、下载、验证或重建失败时，旧本地文件和旧查询索引继续使用。
 - 如果定时任务正在刷新，管理员手动 `/update` 会收到已有刷新正在运行的回复，不会启动第二条流水线。
@@ -246,7 +250,7 @@ REFRESH_METADATA_PATH=./refresh-metadata.json
 REFRESH_SCHEDULE_TIME=05:00
 ```
 
-确认运行进程对 `SENZING_PATH`、`TARGETS_NESTED_PATH` 和 `REFRESH_METADATA_PATH` 所在目录有写权限。
+确认运行进程对 `SENZING_PATH`、`TARGETS_NESTED_PATH`、`SECURITIES_PATH` 和 `REFRESH_METADATA_PATH` 所在目录有写权限。
 
 ## 11. 其他访问模式
 

@@ -1,16 +1,16 @@
 # Sanction API Telegram Bot
 
-这是一个基于 Node.js / TypeScript 的 Telegram 机器人，用本地 OpenSanctions 衍生数据文件做 Debarred 名单查询。机器人支持私有部署、管理员批准访问、基础信息查询和完整制裁详情查询。
+这是一个基于 Node.js / TypeScript 的 Telegram 机器人，用本地 OpenSanctions 衍生数据文件做 Debarred 和 Sanctioned Securities 公司级查询。机器人支持私有部署、管理员批准访问、基础信息查询和完整制裁详情查询。
 
 ## 功能概览
 
-- 通过 Telegram 查询完整主名称或完整别名是否命中 Debarred 记录。
+- 通过 Telegram 查询完整主名称或完整别名是否命中 Debarred 或 Sanctioned Securities 记录。
 - 支持纯文本模糊候选搜索；直接发送主名称或别名的部分输入会返回可能匹配的完整名称候选。
 - 支持 `/check`、`/search`、`/basic`、`/full` 查询命令；菜单选择无参数命令时会等待用户下一条输入。
 - 命中后会返回 `/basic` 和 `/full` 内联按钮，便于继续查看详情。
 - 支持三种访问控制模式：公开、静态白名单、管理员批准。
 - 未授权用户可发送 `/request` 申请访问；管理员可用 `/approve` 批准。
-- 管理员可手动发送 `/update` 检查 OpenSanctions debarment 数据更新；机器人也会每天 05:00 自动检查。
+- 管理员可手动发送 `/update` 检查 OpenSanctions debarment 和 securities 数据更新；机器人也会每天 05:00 自动检查。
 - 启动时优先打开或构建 SQLite 查询库；如果首次启动时数据为空，会先用空库启动服务，再自动触发一次数据更新。
 
 ## 数据文件
@@ -21,19 +21,21 @@
 | --- | --- |
 | `senzing.json` | SQLite 构建输入，提供名称、别名、风险主题和基础信息。 |
 | `targets.nested.json` | SQLite 构建输入，提供 OpenSanctions record id 对应的 `/full` 制裁详情。 |
-| `sanction.sqlite` | 运行时查询库，默认由 `senzing.json` 和 `targets.nested.json` 构建。 |
+| `securities.csv` | Sanctioned Securities 公司级 CSV 输入，提供 company id、名称、别名、LEI、PermID、ISIN、RIC、source datasets 和 risk datasets。 |
+| `sanction.sqlite` | 运行时查询库，默认由 `senzing.json`、`targets.nested.json` 和 `securities.csv` 构建。 |
 | `entities.ftm.json` | V1 阶段只做过评估，不作为当前查询数据源。 |
 | `refresh-metadata.json` | 最近一次成功刷新后的 dataset version 和目标资源 checksum，用于避免无变化时下载大文件。 |
 
-注意：虽然文件名是 `.json`，当前读取逻辑按 JSONL 处理，也就是每一行都是一个独立 JSON 对象。
+注意：虽然 `senzing.json` 和 `targets.nested.json` 文件名是 `.json`，当前读取逻辑按 JSONL 处理，也就是每一行都是一个独立 JSON 对象。Sanctioned Securities 当前使用 OpenSanctions 官方 `securities.csv` 公司级导出；它不是完整 securities 图谱，不包含所有底层 `Security` 实体。
 
 ## 匹配规则
 
 - 查询使用规范化后的完整主名称或完整别名精确匹配，来源是 `NAMES[].NAME_FULL`。
-- `/check`、`/basic`、`/full` 使用完整主名称或完整别名精确匹配。例如：`/check YATAI SMART INDUSTRIAL NEW CITY` 和 `/check YATAI NEW CITY` 都可以命中同一条记录，但 `/check Yatai Smart` 不会按部分名称判断为 `Debarred`。
-- `/search <name>` 和无等待模式下的纯文本会执行模糊候选搜索，会在主名称和别名中查找可能匹配的名称候选，不直接判定 `Debarred`。例如：`Yatai Smart` 或 `Myanmar Yatai` 可返回 `YATAI SMART INDUSTRIAL NEW CITY` 候选。
+- `/check`、`/basic`、`/full` 使用完整主名称或完整别名精确匹配。例如：`/check YATAI SMART INDUSTRIAL NEW CITY` 和 `/check YATAI NEW CITY` 都可以命中同一条记录，但 `/check Yatai Smart` 不会按部分名称判断为命中。
+- `/search <name>` 和无等待模式下的纯文本会执行模糊候选搜索，会在主名称和别名中查找可能匹配的名称候选，不直接给出命中结论。例如：`Yatai Smart` 或 `Myanmar Yatai` 可返回 `YATAI SMART INDUSTRIAL NEW CITY` 候选。
 - 配置 `TELEGRAM_BOT_USERNAME` 后，`/search` 和纯文本模糊搜索结果会在每个候选旁显示 `Full` 链接；点击后通过 Telegram deep link 返回该记录的完整制裁详情。
-- 只有包含风险主题 `debarment` 的记录会返回为 `Debarred`。
+- 查询会同时返回 Debarred 和 Sanctioned Securities 公司级结果。同一 OpenSanctions id 的公司会合并成一条结果，状态显示为 `Debarred + Sanctioned Securities`。
+- 只有包含风险主题 `debarment` 或 `sanctioned_securities` 的记录会返回为精确命中。
 - `/search <name>` 返回按相关性排序且数量受控的候选名称。
 - `/basic <name>` 返回基础记录信息。
 - `/full <name>` 返回制裁详情。
@@ -49,7 +51,7 @@
 
 - Node.js 20 或更高版本。
 - 一个 Telegram Bot Token。
-- 本地数据文件：`senzing.json` 和 `targets.nested.json`；如果首次启动时缺少这些文件，进程需要能访问 OpenSanctions 下载地址以自动补齐。
+- 本地数据文件：`senzing.json`、`targets.nested.json` 和 `securities.csv`；如果首次启动时缺少这些文件，进程需要能访问 OpenSanctions 下载地址以自动补齐。
 
 安装依赖：
 
@@ -68,6 +70,7 @@ export ADMIN_TELEGRAM_USERS="123456789"
 export APPROVED_TELEGRAM_USERS_PATH="./approved-users.json"
 export SENZING_PATH="./senzing.json"
 export TARGETS_NESTED_PATH="./targets.nested.json"
+export SECURITIES_PATH="./securities.csv"
 export SQLITE_PATH="./sanction.sqlite"
 export REFRESH_METADATA_PATH="./refresh-metadata.json"
 export REFRESH_SCHEDULE_TIME="05:00"
@@ -132,7 +135,8 @@ npm run dev
 | `APPROVED_TELEGRAM_USERS_PATH` | `./approved-users.json` | 管理员批准后的用户 ID 存储文件。运行进程必须有写入权限。 |
 | `SENZING_PATH` | `./senzing.json` | `senzing.json` 数据文件路径。 |
 | `TARGETS_NESTED_PATH` | `./targets.nested.json` | `targets.nested.json` 数据文件路径。 |
-| `SQLITE_PATH` | `./sanction.sqlite` | SQLite 查询库路径；启动和刷新时会从 JSONL 数据构建或替换该文件。 |
+| `SECURITIES_PATH` | `./securities.csv` | `securities.csv` 公司级 Sanctioned Securities 数据文件路径。 |
+| `SQLITE_PATH` | `./sanction.sqlite` | SQLite 查询库路径；启动和刷新时会从 JSONL/CSV 数据构建或替换该文件。 |
 | `REFRESH_METADATA_PATH` | `./refresh-metadata.json` | 最近一次成功数据刷新的 metadata/checksum 存储路径。运行进程必须有写入权限。 |
 | `REFRESH_SCHEDULE_TIME` | `05:00` | 每日自动刷新检查时间，使用运行服务器本地时区，格式为 `HH:MM`。 |
 | `MIN_FUZZY_SCORE` | `0.8` | 模糊候选搜索的最低分数阈值；低于该分数的候选不会显示。取值范围为 `0` 到 `1`。 |
@@ -174,7 +178,7 @@ npm run dev
 机器人启动时会自动向 Telegram 注册命令菜单，不需要再到 `@BotFather` 手工配置。菜单中只显示面向查询和入口的快速指令：
 
 - `/start` - 显示帮助和访问状态
-- `/check` - 查询完整主名称或完整别名的 Debarred 状态
+- `/check` - 查询完整主名称或完整别名的 Debarred / Sanctioned Securities 状态
 - `/search` - 按主名称或别名的部分输入搜索候选
 - `/basic` - 显示基础记录信息
 - `/full` - 显示完整制裁详情
@@ -219,6 +223,7 @@ export ADMIN_TELEGRAM_USERS="<admin-telegram-numeric-id>"
 export APPROVED_TELEGRAM_USERS_PATH="./approved-users.json"
 export SENZING_PATH="./senzing.json"
 export TARGETS_NESTED_PATH="./targets.nested.json"
+export SECURITIES_PATH="./securities.csv"
 export SQLITE_PATH="./sanction.sqlite"
 export REFRESH_METADATA_PATH="./refresh-metadata.json"
 export REFRESH_SCHEDULE_TIME="05:00"
@@ -269,19 +274,20 @@ node dist/index.js
 /update
 ```
 
-机器人会先读取 OpenSanctions debarment metadata：
+机器人会同时读取 OpenSanctions debarment metadata 和 securities metadata：
 
 ```text
 https://data.opensanctions.org/datasets/latest/debarment/index.json
+https://data.opensanctions.org/datasets/latest/securities/index.json
 ```
 
 刷新流程：
 
-1. 比较远端 `senzing.json` 和 `targets.nested.json` 的 checksum 与 `REFRESH_METADATA_PATH` 中的本地 metadata。
+1. 比较远端 `senzing.json`、`targets.nested.json` 和 `securities.csv` 的 checksum 与 `REFRESH_METADATA_PATH` 中的本地 metadata。
 2. 如果 checksum 相同，不下载完整文件，直接回复数据已经是最新。
-3. 如果任一目标资源变化，从同一个 metadata version 下载两个目标资源到临时文件。
+3. 如果任一目标资源变化，下载三个目标资源到临时文件。
 4. 先验证下载文件，并在临时目录构建 SQLite 查询库。
-5. 只有 JSONL 文件和 SQLite 查询库都构建成功后，才替换本地文件、写入刷新 metadata，并热切换查询服务。
+5. 只有 JSONL/CSV 文件和 SQLite 查询库都构建成功后，才替换本地文件、写入刷新 metadata，并热切换查询服务。
 6. 任何 metadata、下载、验证或索引构建失败都会保留旧数据，玩家查询继续使用旧索引。
 
 机器人启动后还会按 `REFRESH_SCHEDULE_TIME` 每天自动执行同一条安全刷新路径，默认是服务器本地时区 05:00。并发刷新会被拒绝，管理员会收到已有刷新正在运行的回复。
@@ -324,9 +330,10 @@ V1 版本把文件解析逻辑放在 repository adapter 中，业务查询通过
 
 当前实现：
 
-- `sqliteBuilder` 从 `senzing.json` 和 `targets.nested.json` 构建 `sanction.sqlite`。
+- `sqliteBuilder` 从 `senzing.json`、`targets.nested.json` 和 `securities.csv` 构建 `sanction.sqlite`。
 - `SqliteSenzingRepository` 从 SQLite 查询完整名称、完整别名和模糊候选。
 - `SqliteTargetDetailsRepository` 从 SQLite 读取 OpenSanctions nested sanctions，并返回较小的 `SanctionDetail` DTO。
+- `SqliteTargetDetailsRepository` 从 SQLite 读取公司级 securities detail，并在 `/full` 中显示 LEI、PermID、ISIN、RIC 和 risk datasets。
 - Telegram handler 只依赖领域服务和 repository interface，不直接暴露原始 OpenSanctions nested record。
 
 这样做的目的是让后续替换为 MongoDB 或其他持久化 adapter 时，不需要重写 Telegram bot handler。
