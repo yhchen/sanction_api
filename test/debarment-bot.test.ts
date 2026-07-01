@@ -802,6 +802,7 @@ describe('config', () => {
           TELEGRAM_BOT_TOKEN: 'token',
           SENZING_PATH: 'senzing.json',
           TARGETS_NESTED_PATH: 'targets.nested.json',
+          SECURITIES_PATH: 'securities.csv',
           ALLOWED_TELEGRAM_USERS: '123',
           MAX_RESULTS: '7',
           MAX_MESSAGE_CHARS: '1234',
@@ -810,6 +811,7 @@ describe('config', () => {
       ),
     ).toMatchObject({
       telegramBotToken: 'token',
+      securitiesPath: 'securities.csv',
       allowedTelegramUsers: '123',
       maxResults: 7,
       maxMessageChars: 1234,
@@ -943,15 +945,18 @@ describe('config', () => {
   test('loads SQLite path with a local default', () => {
     expect(loadConfig({ TELEGRAM_BOT_TOKEN: 'token' })).toMatchObject({
       sqlitePath: './sanction.sqlite',
+      securitiesPath: './securities.csv',
     });
 
     expect(
       loadConfig({
         TELEGRAM_BOT_TOKEN: 'token',
         SQLITE_PATH: './data/custom.sqlite',
+        SECURITIES_PATH: './data/custom-securities.csv',
       }),
     ).toMatchObject({
       sqlitePath: './data/custom.sqlite',
+      securitiesPath: './data/custom-securities.csv',
     });
   });
 });

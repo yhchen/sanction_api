@@ -6,6 +6,7 @@ const config = loadConfig(process.env, { requireToken: false });
 await buildSqliteDatabase({
   senzingPath: config.senzingPath,
   targetsNestedPath: config.targetsNestedPath,
+  securitiesPath: config.securitiesPath,
   sqlitePath: config.sqlitePath,
 });
 

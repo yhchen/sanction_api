@@ -8,6 +8,7 @@ import { validateSqliteSchema } from './sqliteSchema.js';
 export interface BootstrapSqliteOptions {
   senzingPath: string;
   targetsNestedPath: string;
+  securitiesPath: string;
   sqlitePath: string;
   minFuzzyScore?: number;
 }
@@ -32,14 +33,15 @@ async function bootstrapSqliteRepositoriesAttempt(options: BootstrapSqliteOption
   const sqliteExists = await exists(options.sqlitePath);
   const senzingState = await fileState(options.senzingPath);
   const targetsNestedState = await fileState(options.targetsNestedPath);
+  const securitiesState = await fileState(options.securitiesPath);
   const sqliteStats = sqliteExists ? readCompatibleSqliteSenzingStats(options.sqlitePath) : undefined;
   const sqliteIsEmpty = sqliteStats === undefined || sqliteStats.records === 0;
 
   if (!sqliteIsEmpty) return openBootstrapResult(options.sqlitePath, false, options.minFuzzyScore);
 
-  assertCompleteStartupData(options, senzingState, targetsNestedState);
+  assertCompleteStartupData(options, senzingState, targetsNestedState, securitiesState);
 
-  if (senzingState.populated && targetsNestedState.populated) {
+  if (senzingState.populated && targetsNestedState.populated && securitiesState.populated) {
     await buildSqliteDatabase(options);
     return openBootstrapResult(options.sqlitePath, false, options.minFuzzyScore);
   }
@@ -48,10 +50,11 @@ async function bootstrapSqliteRepositoriesAttempt(options: BootstrapSqliteOption
     return openBootstrapResult(options.sqlitePath, true, options.minFuzzyScore);
   }
 
-  if (!senzingState.exists && !targetsNestedState.exists) {
+  if (!senzingState.exists && !targetsNestedState.exists && !securitiesState.exists) {
     const createdSenzing = await createEmptyJsonl(options.senzingPath);
     const createdTargetsNested = await createEmptyJsonl(options.targetsNestedPath);
-    if (!createdSenzing || !createdTargetsNested) {
+    const createdSecurities = await createEmptyJsonl(options.securitiesPath);
+    if (!createdSenzing || !createdTargetsNested || !createdSecurities) {
       if (createRaceRetries >= 1) throw new Error('Startup data files changed during bootstrap.');
       return bootstrapSqliteRepositoriesAttempt(options, createRaceRetries + 1);
     }
@@ -91,11 +94,24 @@ async function createEmptyJsonl(filePath: string): Promise<boolean> {
   }
 }
 
-function assertCompleteStartupData(options: BootstrapSqliteOptions, senzingState: FileState, targetsNestedState: FileState): void {
-  if (!senzingState.exists && targetsNestedState.exists) throw new Error(`Missing startup data file: ${options.senzingPath}`);
-  if (senzingState.exists && !targetsNestedState.exists) throw new Error(`Missing startup data file: ${options.targetsNestedPath}`);
-  if (senzingState.populated && !targetsNestedState.populated) throw new Error(`Missing startup data file: ${options.targetsNestedPath}`);
-  if (!senzingState.populated && targetsNestedState.populated) throw new Error(`Missing startup data file: ${options.senzingPath}`);
+function assertCompleteStartupData(
+  options: BootstrapSqliteOptions,
+  senzingState: FileState,
+  targetsNestedState: FileState,
+  securitiesState: FileState,
+): void {
+  const states = [
+    [options.senzingPath, senzingState],
+    [options.targetsNestedPath, targetsNestedState],
+    [options.securitiesPath, securitiesState],
+  ] as const;
+  const anyExisting = states.some(([, state]) => state.exists);
+  if (!anyExisting) return;
+
+  const anyPopulated = states.some(([, state]) => state.populated);
+  for (const [filePath, state] of states) {
+    if (!state.exists || (anyPopulated && !state.populated)) throw new Error(`Missing startup data file: ${filePath}`);
+  }
 }
 
 function openBootstrapResult(sqlitePath: string, shouldAutoRefresh: boolean, minFuzzyScore?: number): BootstrapSqliteResult {
