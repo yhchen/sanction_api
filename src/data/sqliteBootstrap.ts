@@ -4,6 +4,7 @@ import Database from 'better-sqlite3';
 import type { RepositoryStats } from '../domain/types.js';
 import { buildSqliteDatabase, createEmptySqliteDatabase } from './sqliteBuilder.js';
 import { SqliteSenzingRepository, SqliteTargetDetailsRepository } from './sqliteRepositories.js';
+import { validateSqliteSchema } from './sqliteSchema.js';
 
 export interface BootstrapSqliteOptions {
   senzingPath: string;
@@ -27,7 +28,7 @@ export async function bootstrapSqliteRepositories(options: BootstrapSqliteOption
   const sqliteExists = await exists(options.sqlitePath);
   const senzingState = await fileState(options.senzingPath);
   const targetsNestedState = await fileState(options.targetsNestedPath);
-  const sqliteStats = sqliteExists ? readSqliteSenzingStats(options.sqlitePath) : undefined;
+  const sqliteStats = sqliteExists ? readCompatibleSqliteSenzingStats(options.sqlitePath) : undefined;
   const sqliteIsEmpty = sqliteStats === undefined || sqliteStats.records === 0;
 
   if (!sqliteIsEmpty) return openBootstrapResult(options.sqlitePath, false, sqliteStats);
@@ -39,7 +40,7 @@ export async function bootstrapSqliteRepositories(options: BootstrapSqliteOption
     return openBootstrapResult(options.sqlitePath, false);
   }
 
-  if (sqliteExists) {
+  if (sqliteExists && sqliteStats) {
     return openBootstrapResult(options.sqlitePath, true, sqliteStats);
   }
 
@@ -70,9 +71,13 @@ async function fileState(filePath: string): Promise<FileState> {
 }
 
 async function createEmptyJsonl(filePath: string): Promise<void> {
-  if (await exists(filePath)) return;
   await fs.mkdir(path.dirname(filePath), { recursive: true });
-  await fs.writeFile(filePath, '', 'utf8');
+  try {
+    await fs.writeFile(filePath, '', { encoding: 'utf8', flag: 'wx' });
+  } catch (error: unknown) {
+    if (isNodeError(error) && error.code === 'EEXIST') return;
+    throw error;
+  }
 }
 
 function assertCompleteStartupData(options: BootstrapSqliteOptions, senzingState: FileState, targetsNestedState: FileState): void {
@@ -85,7 +90,7 @@ function assertCompleteStartupData(options: BootstrapSqliteOptions, senzingState
 function openBootstrapResult(sqlitePath: string, shouldAutoRefresh: boolean, stats?: RepositoryStats): BootstrapSqliteResult {
   const senzingRepository = SqliteSenzingRepository.open(sqlitePath);
   try {
-    const senzingStats = stats ?? readSqliteSenzingStats(sqlitePath);
+    const senzingStats = stats ?? readCompatibleSqliteSenzingStats(sqlitePath) ?? { records: 0, indexedNames: 0 };
     senzingRepository.stats = () => senzingStats;
     const targetDetailsRepository = SqliteTargetDetailsRepository.open(sqlitePath);
     return {
@@ -103,9 +108,10 @@ function openBootstrapResult(sqlitePath: string, shouldAutoRefresh: boolean, sta
   }
 }
 
-function readSqliteSenzingStats(sqlitePath: string): RepositoryStats {
+function readCompatibleSqliteSenzingStats(sqlitePath: string): RepositoryStats | undefined {
   const db = new Database(sqlitePath, { readonly: true, fileMustExist: true });
   try {
+    if (!validateSqliteSchema(db)) return undefined;
     return {
       records: count(db, 'SELECT COUNT(*) AS count FROM records'),
       indexedNames: count(db, 'SELECT COUNT(*) AS count FROM names'),

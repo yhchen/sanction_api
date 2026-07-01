@@ -92,4 +92,36 @@ describe('SQLite bootstrap', () => {
 
     await expect(bootstrapSqliteRepositories(paths)).rejects.toThrow(`Missing startup data file: ${paths.senzingPath}`);
   });
+
+  test('rebuilds incompatible SQLite from populated JSONL startup data', async () => {
+    const paths = await tempBootstrapPaths();
+    await fs.mkdir(path.dirname(paths.senzingPath), { recursive: true });
+    await fs.copyFile(senzingFixture, paths.senzingPath);
+    await fs.copyFile(targetsNestedFixture, paths.targetsNestedPath);
+    await fs.writeFile(paths.sqlitePath, 'not a sqlite database', 'utf8');
+
+    const result = await bootstrapSqliteRepositories(paths);
+    try {
+      expect(result.shouldAutoRefresh).toBe(false);
+      expect(result.senzingRepository.stats().records).toBe(5);
+    } finally {
+      result.close();
+    }
+  });
+
+  test('recreates empty SQLite and JSONL files when incompatible SQLite has no JSONL data', async () => {
+    const paths = await tempBootstrapPaths();
+    await fs.mkdir(path.dirname(paths.sqlitePath), { recursive: true });
+    await fs.writeFile(paths.sqlitePath, 'not a sqlite database', 'utf8');
+
+    const result = await bootstrapSqliteRepositories(paths);
+    try {
+      expect(result.shouldAutoRefresh).toBe(true);
+      expect(result.senzingRepository.stats()).toEqual({ records: 0, indexedNames: 0 });
+      expect(await fs.readFile(paths.senzingPath, 'utf8')).toBe('');
+      expect(await fs.readFile(paths.targetsNestedPath, 'utf8')).toBe('');
+    } finally {
+      result.close();
+    }
+  });
 });
