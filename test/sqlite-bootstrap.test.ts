@@ -147,6 +147,37 @@ describe('SQLite bootstrap', () => {
     }
   });
 
+  test('creates empty SQLite when zero-byte JSONL placeholders already exist', async () => {
+    const paths = await tempBootstrapPaths();
+    await fs.mkdir(path.dirname(paths.senzingPath), { recursive: true });
+    await fs.writeFile(paths.senzingPath, '', 'utf8');
+    await fs.writeFile(paths.targetsNestedPath, '', 'utf8');
+
+    const result = await bootstrapSqliteRepositories(paths);
+    try {
+      expect(result.shouldAutoRefresh).toBe(true);
+      expect(result.senzingRepository.stats()).toEqual({ records: 0, indexedNames: 0 });
+    } finally {
+      result.close();
+    }
+  });
+
+  test('recreates empty SQLite when zero-byte JSONL placeholders exist with incompatible SQLite', async () => {
+    const paths = await tempBootstrapPaths();
+    await fs.mkdir(path.dirname(paths.senzingPath), { recursive: true });
+    await fs.writeFile(paths.senzingPath, '', 'utf8');
+    await fs.writeFile(paths.targetsNestedPath, '', 'utf8');
+    await fs.writeFile(paths.sqlitePath, 'not a sqlite database', 'utf8');
+
+    const result = await bootstrapSqliteRepositories(paths);
+    try {
+      expect(result.shouldAutoRefresh).toBe(true);
+      expect(result.senzingRepository.stats()).toEqual({ records: 0, indexedNames: 0 });
+    } finally {
+      result.close();
+    }
+  });
+
   test('rechecks startup data when empty JSONL creation races with another writer', async () => {
     const paths = await tempBootstrapPaths();
     const writeFile = vi.spyOn(fs, 'writeFile');

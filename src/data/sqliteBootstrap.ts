@@ -47,11 +47,13 @@ async function bootstrapSqliteRepositoriesAttempt(options: BootstrapSqliteOption
     return openBootstrapResult(options.sqlitePath, true);
   }
 
-  const createdSenzing = await createEmptyJsonl(options.senzingPath);
-  const createdTargetsNested = await createEmptyJsonl(options.targetsNestedPath);
-  if (!createdSenzing || !createdTargetsNested) {
-    if (createRaceRetries >= 1) throw new Error('Startup data files changed during bootstrap.');
-    return bootstrapSqliteRepositoriesAttempt(options, createRaceRetries + 1);
+  if (!senzingState.exists && !targetsNestedState.exists) {
+    const createdSenzing = await createEmptyJsonl(options.senzingPath);
+    const createdTargetsNested = await createEmptyJsonl(options.targetsNestedPath);
+    if (!createdSenzing || !createdTargetsNested) {
+      if (createRaceRetries >= 1) throw new Error('Startup data files changed during bootstrap.');
+      return bootstrapSqliteRepositoriesAttempt(options, createRaceRetries + 1);
+    }
   }
   await createEmptySqliteDatabase(options.sqlitePath);
   return openBootstrapResult(options.sqlitePath, true);
