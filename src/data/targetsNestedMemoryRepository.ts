@@ -25,6 +25,10 @@ export class TargetsNestedMemoryRepository implements TargetDetailsRepository {
     return [...(this.sanctionsById.get(recordId) ?? [])];
   }
 
+  findSecuritiesByRecordId(_recordId: string): undefined {
+    return undefined;
+  }
+
   stats(): RepositoryStats {
     return { records: this.sanctionsById.size };
   }

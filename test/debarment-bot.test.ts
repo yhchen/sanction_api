@@ -309,6 +309,52 @@ describe('repositories and debarment service', () => {
     expect(result.matches).toHaveLength(2);
     expect(result.truncated).toBe(true);
   });
+
+  test('reports securities-only exact matches as Sanctioned Securities', async () => {
+    const service = new DebarmentService(
+      SenzingMemoryRepository.fromRecords([{
+        DATA_SOURCE: 'SECURITIES',
+        RECORD_ID: 'SEC-1',
+        NAMES: [{ NAME_TYPE: 'PRIMARY', NAME_FULL: 'SECURITIES ONLY LTD' }],
+        RISKS: [{ TOPIC: 'sanctioned_securities' }],
+        URL: 'https://www.opensanctions.org/entities/SEC-1',
+      }]),
+      TargetsNestedMemoryRepository.fromRecords([]),
+    );
+
+    await expect(service.check('SECURITIES ONLY LTD')).resolves.toMatchObject({
+      found: true,
+      matches: [{
+        basic: {
+          recordId: 'SEC-1',
+          statuses: ['sanctioned_securities'],
+          risks: ['sanctioned_securities'],
+        },
+      }],
+    });
+  });
+
+  test('reports merged debarred and securities statuses once', async () => {
+    const service = new DebarmentService(
+      SenzingMemoryRepository.fromRecords([{
+        DATA_SOURCE: 'MERGED',
+        RECORD_ID: 'MERGED-1',
+        NAMES: [{ NAME_TYPE: 'PRIMARY', NAME_FULL: 'MERGED COMPANY LTD' }],
+        RISKS: [{ TOPIC: 'debarment' }, { TOPIC: 'sanctioned_securities' }],
+      }]),
+      TargetsNestedMemoryRepository.fromRecords([]),
+    );
+
+    await expect(service.check('MERGED COMPANY LTD')).resolves.toMatchObject({
+      found: true,
+      matches: [{
+        basic: {
+          recordId: 'MERGED-1',
+          statuses: ['debarred', 'sanctioned_securities'],
+        },
+      }],
+    });
+  });
 });
 
 describe('formatters', () => {
