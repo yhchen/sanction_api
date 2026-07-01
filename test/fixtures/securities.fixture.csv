@@ -1,0 +1,5 @@
+"caption","lei","perm_id","isins","ric","countries","sanctioned","eo_14071","public","id","url","datasets","risk_datasets","aliases","referents"
+"YATAI SMART INDUSTRIAL NEW CITY","","","","","mm","t","f","f","NK-223CQDBzp8MRkdJMDiqXn3","https://www.opensanctions.org/entities/NK-223CQDBzp8MRkdJMDiqXn3","us_ofac_sdn","us_ofac_sdn","Myanmar Yatai International Holding Group Co., LTD.;Yatai New City","ofac-54742;usgsa-s4mrwvjp8"
+"SECURITIES ONLY LTD","213800SS45WKYIT4EP89","5063730210","RU000A0JX0J2;RU000A0JX0J3","ONLY.MM","ru","f","t","t","NK-SECURITIESONLY","https://www.opensanctions.org/entities/NK-SECURITIESONLY","ru_nsd_isin","ru_nsd_isin","Securities Only Limited;Only Securities","lei-213800SS45WKYIT4EP89;permid-5063730210"
+"LEI MERGED COMPANY","529900T8BM49AURSDO55","","","","gb","t","f","f","NK-SEC-LEI","https://www.opensanctions.org/entities/NK-SEC-LEI","gb_hmt_invbans","gb_hmt_invbans","LEI Merge Alias","lei-529900T8BM49AURSDO55"
+"AMBIGUOUS SHARED NAME","","","","","us","t","f","f","NK-SEC-AMBIGUOUS","https://www.opensanctions.org/entities/NK-SEC-AMBIGUOUS","us_ofac_sdn","us_ofac_sdn","Shared Alias","ofac-ambiguous"
