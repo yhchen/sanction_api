@@ -133,13 +133,8 @@ export class SqliteSenzingRepository implements SenzingLookupRepository {
   }
 
   stats(): RepositoryStats {
-    const records = count(this.db, 'SELECT COUNT(*) AS count FROM records WHERE is_debarment = 1');
-    const indexedNames = count(this.db, `
-      SELECT COUNT(*) AS count
-      FROM names n
-      INNER JOIN records r ON r.record_id = n.record_id
-      WHERE r.is_debarment = 1
-    `);
+    const records = count(this.db, 'SELECT COUNT(*) AS count FROM records');
+    const indexedNames = count(this.db, 'SELECT COUNT(*) AS count FROM names');
     return { records, indexedNames };
   }
 

@@ -1,11 +1,16 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { describe, expect, test } from 'vitest';
+import { afterEach, describe, expect, test, vi } from 'vitest';
 import { bootstrapSqliteRepositories } from '../src/data/sqliteBootstrap.js';
+import { SqliteSenzingRepository } from '../src/data/sqliteRepositories.js';
 
 const senzingFixture = path.join(process.cwd(), 'test/fixtures/senzing.fixture.jsonl');
 const targetsNestedFixture = path.join(process.cwd(), 'test/fixtures/targets.nested.fixture.jsonl');
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 interface BootstrapPaths {
   senzingPath: string;
@@ -49,6 +54,23 @@ describe('SQLite bootstrap', () => {
       expect(result.senzingRepository.stats().records).toBe(5);
     } finally {
       result.close();
+    }
+  });
+
+  test('reports matching stats from bootstrap-open and direct-open SQLite repositories', async () => {
+    const paths = await tempBootstrapPaths();
+    await fs.mkdir(path.dirname(paths.senzingPath), { recursive: true });
+    await fs.copyFile(senzingFixture, paths.senzingPath);
+    await fs.copyFile(targetsNestedFixture, paths.targetsNestedPath);
+
+    const bootstrapResult = await bootstrapSqliteRepositories(paths);
+    const directRepository = SqliteSenzingRepository.open(paths.sqlitePath);
+    try {
+      expect(bootstrapResult.senzingRepository.stats()).toEqual({ records: 5, indexedNames: 8 });
+      expect(directRepository.stats()).toEqual(bootstrapResult.senzingRepository.stats());
+    } finally {
+      directRepository.close();
+      bootstrapResult.close();
     }
   });
 
@@ -120,6 +142,26 @@ describe('SQLite bootstrap', () => {
       expect(result.senzingRepository.stats()).toEqual({ records: 0, indexedNames: 0 });
       expect(await fs.readFile(paths.senzingPath, 'utf8')).toBe('');
       expect(await fs.readFile(paths.targetsNestedPath, 'utf8')).toBe('');
+    } finally {
+      result.close();
+    }
+  });
+
+  test('rechecks startup data when empty JSONL creation races with another writer', async () => {
+    const paths = await tempBootstrapPaths();
+    const writeFile = vi.spyOn(fs, 'writeFile');
+    writeFile.mockImplementationOnce(async () => {
+      await fs.copyFile(senzingFixture, paths.senzingPath);
+      await fs.copyFile(targetsNestedFixture, paths.targetsNestedPath);
+      const error = new Error('file already exists') as NodeJS.ErrnoException;
+      error.code = 'EEXIST';
+      throw error;
+    });
+
+    const result = await bootstrapSqliteRepositories(paths);
+    try {
+      expect(result.shouldAutoRefresh).toBe(false);
+      expect(result.senzingRepository.stats()).toEqual({ records: 5, indexedNames: 8 });
     } finally {
       result.close();
     }

@@ -1,7 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import Database from 'better-sqlite3';
-import type { RepositoryStats } from '../domain/types.js';
 import { buildSqliteDatabase, createEmptySqliteDatabase } from './sqliteBuilder.js';
 import { SqliteSenzingRepository, SqliteTargetDetailsRepository } from './sqliteRepositories.js';
 import { validateSqliteSchema } from './sqliteSchema.js';
@@ -25,13 +24,17 @@ interface FileState {
 }
 
 export async function bootstrapSqliteRepositories(options: BootstrapSqliteOptions): Promise<BootstrapSqliteResult> {
+  return bootstrapSqliteRepositoriesAttempt(options, 0);
+}
+
+async function bootstrapSqliteRepositoriesAttempt(options: BootstrapSqliteOptions, createRaceRetries: number): Promise<BootstrapSqliteResult> {
   const sqliteExists = await exists(options.sqlitePath);
   const senzingState = await fileState(options.senzingPath);
   const targetsNestedState = await fileState(options.targetsNestedPath);
   const sqliteStats = sqliteExists ? readCompatibleSqliteSenzingStats(options.sqlitePath) : undefined;
   const sqliteIsEmpty = sqliteStats === undefined || sqliteStats.records === 0;
 
-  if (!sqliteIsEmpty) return openBootstrapResult(options.sqlitePath, false, sqliteStats);
+  if (!sqliteIsEmpty) return openBootstrapResult(options.sqlitePath, false);
 
   assertCompleteStartupData(options, senzingState, targetsNestedState);
 
@@ -41,11 +44,15 @@ export async function bootstrapSqliteRepositories(options: BootstrapSqliteOption
   }
 
   if (sqliteExists && sqliteStats) {
-    return openBootstrapResult(options.sqlitePath, true, sqliteStats);
+    return openBootstrapResult(options.sqlitePath, true);
   }
 
-  await createEmptyJsonl(options.senzingPath);
-  await createEmptyJsonl(options.targetsNestedPath);
+  const createdSenzing = await createEmptyJsonl(options.senzingPath);
+  const createdTargetsNested = await createEmptyJsonl(options.targetsNestedPath);
+  if (!createdSenzing || !createdTargetsNested) {
+    if (createRaceRetries >= 1) throw new Error('Startup data files changed during bootstrap.');
+    return bootstrapSqliteRepositoriesAttempt(options, createRaceRetries + 1);
+  }
   await createEmptySqliteDatabase(options.sqlitePath);
   return openBootstrapResult(options.sqlitePath, true);
 }
@@ -70,12 +77,13 @@ async function fileState(filePath: string): Promise<FileState> {
   }
 }
 
-async function createEmptyJsonl(filePath: string): Promise<void> {
+async function createEmptyJsonl(filePath: string): Promise<boolean> {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
   try {
     await fs.writeFile(filePath, '', { encoding: 'utf8', flag: 'wx' });
+    return true;
   } catch (error: unknown) {
-    if (isNodeError(error) && error.code === 'EEXIST') return;
+    if (isNodeError(error) && error.code === 'EEXIST') return false;
     throw error;
   }
 }
@@ -87,11 +95,9 @@ function assertCompleteStartupData(options: BootstrapSqliteOptions, senzingState
   if (!senzingState.populated && targetsNestedState.populated) throw new Error(`Missing startup data file: ${options.senzingPath}`);
 }
 
-function openBootstrapResult(sqlitePath: string, shouldAutoRefresh: boolean, stats?: RepositoryStats): BootstrapSqliteResult {
+function openBootstrapResult(sqlitePath: string, shouldAutoRefresh: boolean): BootstrapSqliteResult {
   const senzingRepository = SqliteSenzingRepository.open(sqlitePath);
   try {
-    const senzingStats = stats ?? readCompatibleSqliteSenzingStats(sqlitePath) ?? { records: 0, indexedNames: 0 };
-    senzingRepository.stats = () => senzingStats;
     const targetDetailsRepository = SqliteTargetDetailsRepository.open(sqlitePath);
     return {
       senzingRepository,
@@ -108,7 +114,7 @@ function openBootstrapResult(sqlitePath: string, shouldAutoRefresh: boolean, sta
   }
 }
 
-function readCompatibleSqliteSenzingStats(sqlitePath: string): RepositoryStats | undefined {
+function readCompatibleSqliteSenzingStats(sqlitePath: string): { records: number; indexedNames: number } | undefined {
   const db = new Database(sqlitePath, { readonly: true, fileMustExist: true });
   try {
     if (!validateSqliteSchema(db)) return undefined;
