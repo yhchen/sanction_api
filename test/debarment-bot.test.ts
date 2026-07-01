@@ -403,6 +403,70 @@ describe('formatters', () => {
     ]);
   });
 
+  test('formats securities-only check hit with Sanctioned Securities status', async () => {
+    const securitiesService = new DebarmentService(
+      SenzingMemoryRepository.fromRecords([{
+        RECORD_ID: 'SEC-1',
+        NAMES: [{ NAME_TYPE: 'PRIMARY', NAME_FULL: 'SECURITIES ONLY LTD' }],
+        RISKS: [{ TOPIC: 'sanctioned_securities' }],
+      }]),
+      TargetsNestedMemoryRepository.fromRecords([]),
+    );
+
+    const formatted = formatCheckResult(await securitiesService.check('SECURITIES ONLY LTD'));
+
+    expect(formatted.text.startsWith('Sanctioned Securities')).toBe(true);
+  });
+
+  test('formats full merged result with debarment and securities sections', () => {
+    const formatted = formatFullResults({
+      query: 'MERGED',
+      found: true,
+      totalMatches: 1,
+      truncated: false,
+      matches: [{
+        record: { RECORD_ID: 'MERGED', RISKS: [{ TOPIC: 'debarment' }, { TOPIC: 'sanctioned_securities' }] },
+        matchedName: 'MERGED CO',
+        matchedNameType: 'PRIMARY',
+        basic: {
+          recordId: 'MERGED',
+          primaryName: 'MERGED CO',
+          matchedName: 'MERGED CO',
+          matchedNameType: 'PRIMARY',
+          statuses: ['debarred', 'sanctioned_securities'],
+          aliases: [],
+          risks: ['debarment', 'sanctioned_securities'],
+          countries: ['ru'],
+          addresses: [],
+          identifiers: [{ type: 'ISIN', value: 'RU000A0JX0J2' }],
+          url: 'https://www.opensanctions.org/entities/MERGED',
+        },
+        sanctions: [{ authority: ['OFAC'], status: [], listingDate: [], startDate: [], program: [], provisions: [], sourceUrl: [], summary: [] }],
+        securities: {
+          caption: 'MERGED CO',
+          lei: [],
+          permId: [],
+          isins: ['RU000A0JX0J2'],
+          ric: [],
+          countries: ['ru'],
+          sanctioned: true,
+          eo14071: true,
+          public: false,
+          datasets: ['ru_nsd_isin'],
+          riskDatasets: ['ru_nsd_isin'],
+          referents: ['ref-1'],
+          url: 'https://www.opensanctions.org/entities/MERGED',
+        },
+      }],
+    });
+
+    expect(formatted.text).toContain('Statuses: Debarred, Sanctioned Securities');
+    expect(formatted.text).toContain('Sanctions Details');
+    expect(formatted.text).toContain('Securities Details');
+    expect(formatted.text).toContain('ISINs: RU000A0JX0J2');
+    expect(formatted.text).toContain('Investment Ban: yes');
+  });
+
   test('formats basic and full human-readable sections', async () => {
     const basic = formatBasicResults(await service.basic('YATAI NEW CITY'));
     const full = formatFullResults(await service.full('YATAI NEW CITY'));
