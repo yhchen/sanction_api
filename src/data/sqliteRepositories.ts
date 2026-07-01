@@ -98,7 +98,6 @@ export class SqliteSenzingRepository implements SenzingLookupRepository {
       WHERE name_fts MATCH ?
         AND r.is_debarment = 1
       ORDER BY r.record_id, n.name_full
-      LIMIT 1000
     `).all(ftsQuery) as NameMatchRow[];
 
     const bestByRecordId = new Map<string, SenzingNameCandidate>();
