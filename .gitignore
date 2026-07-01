@@ -16,6 +16,12 @@ refresh-metadata.json
 
 # Database
 db
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+
+# oh-my-codex
+.omx
 
 # Local git worktrees
 .worktrees/

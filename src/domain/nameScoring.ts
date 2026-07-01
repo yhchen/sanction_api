@@ -8,7 +8,7 @@ export interface NameScore {
   matchReason: string;
 }
 
-export const MIN_FUZZY_SCORE = 0.55;
+export const DEFAULT_MIN_FUZZY_SCORE = 0.55;
 
 const LATIN_ALPHA_TOKEN = /^[a-z]+$/u;
 
@@ -20,10 +20,14 @@ export function scoreSearchableName(
   normalizedQuery: string,
   queryTokens: string[],
   candidate: SearchableNameForScoring,
+  minFuzzyScore = DEFAULT_MIN_FUZZY_SCORE,
 ): NameScore | undefined {
   if (!candidate.normalizedName) return undefined;
   if (candidate.normalizedName === normalizedQuery) return { score: 1, matchReason: 'exact-name-candidate' };
-  if (candidate.normalizedName.includes(normalizedQuery)) return { score: 0.95, matchReason: 'contains-query' };
+  if (candidate.normalizedName.includes(normalizedQuery)) {
+    const score = 0.95;
+    return score < minFuzzyScore ? undefined : { score, matchReason: 'contains-query' };
+  }
 
   const candidateTokens = candidate.normalizedTokens;
   if (queryTokens.length === 0 || candidateTokens.length === 0) return undefined;
@@ -45,7 +49,7 @@ export function scoreSearchableName(
   const substringCoverage = substringTokenMatches / queryTokens.length;
   const orderBonus = appearsInOrder(queryTokens, candidateTokens) ? 0.08 : 0;
   const score = Math.min(0.94, tokenCoverage * 0.65 + prefixCoverage * 0.20 + substringCoverage * 0.10 + orderBonus);
-  if (score < MIN_FUZZY_SCORE) return undefined;
+  if (score < minFuzzyScore) return undefined;
 
   const scoreWithoutTypos = Math.min(
     0.94,
@@ -54,7 +58,7 @@ export function scoreSearchableName(
 
   return {
     score,
-    matchReason: typoTokenMatches > 0 && scoreWithoutTypos < MIN_FUZZY_SCORE
+    matchReason: typoTokenMatches > 0 && scoreWithoutTypos < minFuzzyScore
       ? 'similar-name-typo'
       : exactTokenMatches === queryTokens.length ? 'token-match' : 'similar-name',
   };

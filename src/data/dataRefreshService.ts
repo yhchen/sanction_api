@@ -52,6 +52,7 @@ export interface DataRefreshServiceOptions {
   activeRepositories: ActiveDebarmentRepositories;
   fetchMetadata?: RefreshMetadataFetcher;
   downloader?: RefreshDownloader;
+  minFuzzyScore?: number;
   logger?: Pick<Console, 'info' | 'warn' | 'error'>;
 }
 
@@ -83,7 +84,11 @@ export class DataRefreshService {
     try {
       const remoteMetadata = await this.fetchMetadata();
       const localMetadata = await readPersistedMetadata(this.options.refreshMetadataPath);
-      if (metadataChecksumsMatch(localMetadata, remoteMetadata)) {
+      if (metadataChecksumsMatch(localMetadata, remoteMetadata) && await localRefreshOutputsExist({
+        senzingPath: this.options.senzingPath,
+        targetsNestedPath: this.options.targetsNestedPath,
+        sqlitePath: this.options.sqlitePath,
+      })) {
         return { status: 'current', version: remoteMetadata.version, message: `OpenSanctions debarment data is already current (${remoteMetadata.version}).` };
       }
 
@@ -107,7 +112,9 @@ export class DataRefreshService {
         });
         validateSqliteRepositories(stagedSqlitePath);
       } else {
-        nextSenzingRepository = await SenzingMemoryRepository.fromFile(stagedSenzingPath);
+        nextSenzingRepository = await SenzingMemoryRepository.fromFile(stagedSenzingPath, {
+          minFuzzyScore: this.options.minFuzzyScore,
+        });
         nextTargetsRepository = await TargetsNestedMemoryRepository.fromFile(stagedTargetsPath);
       }
 
@@ -126,7 +133,9 @@ export class DataRefreshService {
               let openedSenzingRepository: SqliteSenzingRepository | undefined;
               let openedTargetsRepository: SqliteTargetDetailsRepository | undefined;
               try {
-                openedSenzingRepository = SqliteSenzingRepository.open(this.options.sqlitePath!);
+                openedSenzingRepository = SqliteSenzingRepository.open(this.options.sqlitePath!, {
+                  minFuzzyScore: this.options.minFuzzyScore,
+                });
                 openedTargetsRepository = SqliteTargetDetailsRepository.open(this.options.sqlitePath!);
                 nextSenzingRepository = openedSenzingRepository;
                 nextTargetsRepository = openedTargetsRepository;
@@ -250,6 +259,20 @@ interface ReplaceLocalFilesOptions {
   metadata: DatasetMetadata;
   logger?: Pick<Console, 'warn'>;
   afterPublish?: () => Promise<void>;
+}
+
+
+async function localRefreshOutputsExist(options: { senzingPath: string; targetsNestedPath: string; sqlitePath?: string }): Promise<boolean> {
+  for (const filePath of [options.senzingPath, options.targetsNestedPath, options.sqlitePath].filter(isDefinedString)) {
+    try {
+      const stats = await fs.stat(filePath);
+      if (stats.size === 0) return false;
+    } catch (error: unknown) {
+      if (isNodeError(error) && error.code === 'ENOENT') return false;
+      throw error;
+    }
+  }
+  return true;
 }
 
 async function replaceLocalFilesAndMetadata(options: ReplaceLocalFilesOptions): Promise<void> {

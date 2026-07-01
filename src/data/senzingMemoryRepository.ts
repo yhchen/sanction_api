@@ -1,5 +1,5 @@
 import { normalizeName } from '../domain/normalize.js';
-import { normalizedTokens, scoreSearchableName } from '../domain/nameScoring.js';
+import { DEFAULT_MIN_FUZZY_SCORE, normalizedTokens, scoreSearchableName } from '../domain/nameScoring.js';
 import type { RepositoryStats, SenzingLookupRepository, SenzingNameCandidate, SenzingNameMatch, SenzingRecord } from '../domain/types.js';
 import { readJsonlFile } from './jsonl.js';
 
@@ -8,14 +8,23 @@ interface SearchableNameMatch extends SenzingNameMatch {
   normalizedTokens: string[];
 }
 
+export interface SenzingMemoryRepositoryOptions {
+  minFuzzyScore?: number;
+}
+
 export class SenzingMemoryRepository implements SenzingLookupRepository {
   private readonly recordsById = new Map<string, SenzingRecord>();
   private readonly nameIndex = new Map<string, SenzingNameMatch[]>();
   private readonly searchableNames: SearchableNameMatch[] = [];
+  private readonly minFuzzyScore: number;
   private indexedNames = 0;
 
-  static async fromFile(filePath: string): Promise<SenzingMemoryRepository> {
-    const repository = new SenzingMemoryRepository();
+  constructor(options: SenzingMemoryRepositoryOptions = {}) {
+    this.minFuzzyScore = options.minFuzzyScore ?? DEFAULT_MIN_FUZZY_SCORE;
+  }
+
+  static async fromFile(filePath: string, options: SenzingMemoryRepositoryOptions = {}): Promise<SenzingMemoryRepository> {
+    const repository = new SenzingMemoryRepository(options);
     await readJsonlFile<SenzingRecord>(filePath, (record, lineNumber) => {
       if (!record.RECORD_ID) {
         throw new Error(`Senzing record missing RECORD_ID at line ${lineNumber}`);
@@ -25,8 +34,8 @@ export class SenzingMemoryRepository implements SenzingLookupRepository {
     return repository;
   }
 
-  static fromRecords(records: SenzingRecord[]): SenzingMemoryRepository {
-    const repository = new SenzingMemoryRepository();
+  static fromRecords(records: SenzingRecord[], options: SenzingMemoryRepositoryOptions = {}): SenzingMemoryRepository {
+    const repository = new SenzingMemoryRepository(options);
     for (const record of records) repository.addRecord(record);
     return repository;
   }
@@ -44,7 +53,7 @@ export class SenzingMemoryRepository implements SenzingLookupRepository {
 
     const candidates: SenzingNameCandidate[] = this.searchableNames
       .flatMap((match) => {
-        const score = scoreSearchableName(normalizedQuery, queryTokens, match);
+        const score = scoreSearchableName(normalizedQuery, queryTokens, match, this.minFuzzyScore);
         return score === undefined
           ? []
           : [{

@@ -18,10 +18,11 @@ const targetsFixture = path.join(fixturesDir, 'targets.nested.fixture.jsonl');
 const emptyDataExactMessage = 'Local debarment data is not loaded yet. Data refresh may still be running; try again after the update completes.';
 const emptyDataSearchMessage = 'Local debarment data is not loaded yet, so candidate search is unavailable. Try again after the update completes.';
 
-async function buildService(options: DebarmentServiceOptions = {}) {
-  const senzing = await SenzingMemoryRepository.fromFile(senzingFixture);
+async function buildService(options: DebarmentServiceOptions & { minFuzzyScore?: number } = {}) {
+  const { minFuzzyScore = 0.55, ...serviceOptions } = options;
+  const senzing = await SenzingMemoryRepository.fromFile(senzingFixture, { minFuzzyScore });
   const targets = await TargetsNestedMemoryRepository.fromFile(targetsFixture);
-  return new DebarmentService(senzing, targets, options);
+  return new DebarmentService(senzing, targets, serviceOptions);
 }
 
 function buildEmptyService(options: DebarmentServiceOptions = {}) {
@@ -96,13 +97,22 @@ describe('normalized exact matching', () => {
     expect(normalizeName('ＹＡＴＡＩ　ＮＥＷ　ＣＩＴＹ')).toBe(normalizeName('yatai new city'));
   });
 
-  test('matches complete primary or alias names, not partial names', async () => {
+  test('exact lookup matches complete primary names and complete aliases, not partial names', async () => {
     const service = await buildService();
 
     await expect(service.check('YATAI SMART INDUSTRIAL NEW CITY')).resolves.toMatchObject({ found: true });
     await expect(service.check('YATAI NEW CITY')).resolves.toMatchObject({ found: true });
     await expect(service.check('MYANMAR YATAI INTERNATIONAL HOLDING GROUP CO LTD')).resolves.toMatchObject({ found: true });
+    await expect(service.basic('MYANMAR YATAI INTERNATIONAL HOLDING GROUP CO LTD')).resolves.toMatchObject({
+      found: true,
+      matches: [{ basic: { matchedName: 'MYANMAR YATAI INTERNATIONAL HOLDING GROUP CO., LTD.' } }],
+    });
+    await expect(service.full('SHWE KOKKO SPECIAL ECONOMIC ZONE')).resolves.toMatchObject({
+      found: true,
+      matches: [{ basic: { matchedName: 'SHWE KOKKO SPECIAL ECONOMIC ZONE' } }],
+    });
     await expect(service.check('Yatai Smart')).resolves.toMatchObject({ found: false, matches: [] });
+    await expect(service.check('Myanmar Yatai')).resolves.toMatchObject({ found: false, matches: [] });
   });
 
   test('does not report non-debarment exact matches as Debarred', async () => {
@@ -120,7 +130,19 @@ describe('normalized exact matching', () => {
         { basic: { primaryName: 'YATAI SMART INDUSTRIAL NEW CITY' } },
       ],
     });
+    await expect(service.searchCandidates('Myanmar Yatai')).resolves.toMatchObject({
+      found: true,
+      candidates: [
+        {
+          basic: {
+            primaryName: 'YATAI SMART INDUSTRIAL NEW CITY',
+            matchedName: 'MYANMAR YATAI INTERNATIONAL HOLDING GROUP CO., LTD.',
+          },
+        },
+      ],
+    });
     await expect(service.check('Yatai Smart')).resolves.toMatchObject({ found: false, matches: [] });
+    await expect(service.check('Myanmar Yatai')).resolves.toMatchObject({ found: false, matches: [] });
     await expect(service.searchCandidates('HARMLESS SHIPPING LTD')).resolves.toMatchObject({ found: false, candidates: [] });
     await expect(service.searchCandidates('HPA-AN CITY')).resolves.toMatchObject({ found: false, candidates: [] });
     await expect(service.searchCandidates('PW2XZT68KVW9')).resolves.toMatchObject({ found: false, candidates: [] });
@@ -260,6 +282,17 @@ describe('repositories and debarment service', () => {
     expect(repo.findCandidateNames('PW2XZT68KVW9')).toEqual([]);
   });
 
+  test('filters fuzzy candidates below the configured score threshold', async () => {
+    const strictRepo = await SenzingMemoryRepository.fromFile(senzingFixture, { minFuzzyScore: 0.96 });
+    const relaxedRepo = await SenzingMemoryRepository.fromFile(senzingFixture, { minFuzzyScore: 0.55 });
+
+    expect(strictRepo.findCandidateNames('Yatai Smart')).toEqual([]);
+    expect(relaxedRepo.findCandidateNames('Yatai Smart')[0]).toMatchObject({
+      matchedName: 'YATAI SMART INDUSTRIAL NEW CITY',
+      score: expect.any(Number),
+    });
+  });
+
   test('joins targets.nested details for full output', async () => {
     const service = await buildService();
     const result = await service.full('YATAI NEW CITY');
@@ -342,18 +375,26 @@ describe('formatters', () => {
     expect(formatted.text).toContain('Showing 2 of 3 matches');
   });
 
-  test('formats fuzzy candidates without Debarred verdict language', async () => {
-    const formatted = formatFuzzySearchResult(await service.searchCandidates('Yatai Smart'));
+  test('formats fuzzy candidates with row-level full links and no candidate buttons', async () => {
+    const formatted = formatFuzzySearchResult(await service.searchCandidates('Yatai Smart'), {
+      telegramBotUsername: 'ExampleDebarmentBot',
+    });
 
     expect(formatted.text).toMatch(/^Possible matches/);
     expect(formatted.text).toContain('YATAI SMART INDUSTRIAL NEW CITY');
+    expect(formatted.text).toContain('<a href="https://t.me/ExampleDebarmentBot?start=full_NK-223CQDBzp8MRkdJMDiqXn3">Full</a>');
     expect(formatted.text).not.toMatch(/^Debarred/);
-    expect(formatted.buttons).toEqual([
-      [
-        { text: '/basic 1', callbackData: 'basic:NK-223CQDBzp8MRkdJMDiqXn3' },
-        { text: '/full 1', callbackData: 'full:NK-223CQDBzp8MRkdJMDiqXn3' },
-      ],
-    ]);
+    expect(formatted.buttons).toEqual([]);
+    expect(formatted.parseMode).toBe('HTML');
+  });
+
+  test('formats fuzzy candidates without invalid full links when bot username is missing', async () => {
+    const formatted = formatFuzzySearchResult(await service.searchCandidates('Yatai Smart'));
+
+    expect(formatted.text).toContain('YATAI SMART INDUSTRIAL NEW CITY');
+    expect(formatted.text).not.toContain('https://t.me/');
+    expect(formatted.buttons).toEqual([]);
+    expect(formatted.parseMode).toBeUndefined();
   });
 
   test('formats fuzzy misses distinctly from exact No Data Found', async () => {
@@ -417,15 +458,12 @@ describe('access control and pure handlers', () => {
 
     await expect(handler.handleMessage('Yatai Smart', 123)).resolves.toMatchObject({
       text: expect.stringMatching(/^Possible matches/),
-      buttons: [[
-        { text: '/basic 1', callbackData: 'basic:NK-223CQDBzp8MRkdJMDiqXn3' },
-        { text: '/full 1', callbackData: 'full:NK-223CQDBzp8MRkdJMDiqXn3' },
-      ]],
+      buttons: [],
     });
     const exactNameReply = await handler.handleMessage('YATAI SMART INDUSTRIAL NEW CITY', 123);
     expect(exactNameReply.text).toMatch(/^Possible matches/);
     expect(exactNameReply.text).not.toMatch(/^Debarred/);
-    expect(exactNameReply.buttons.flat()).toHaveLength(2);
+    expect(exactNameReply.buttons).toEqual([]);
   });
 
   test('unauthorized start shows request instructions and user id', async () => {
@@ -554,9 +592,19 @@ describe('access control and pure handlers', () => {
     await expect(handler.handleMessage('/basic YATAI NEW CITY', 123)).resolves.toMatchObject({ text: expect.stringContaining('Basic Information') });
     await expect(handler.handleMessage('/full YATAI NEW CITY', 123)).resolves.toMatchObject({ text: expect.stringContaining('Sanctions Details') });
     await expect(handler.handleMessage('/check YATAI SMART INDUSTRIAL NEW CITY', 123)).resolves.toMatchObject({ text: expect.stringMatching(/^Debarred/) });
+    await expect(handler.handleMessage('/check MYANMAR YATAI INTERNATIONAL HOLDING GROUP CO LTD', 123)).resolves.toMatchObject({
+      text: expect.stringMatching(/^Debarred/),
+    });
+    await expect(handler.handleMessage('/basic MYANMAR YATAI INTERNATIONAL HOLDING GROUP CO LTD', 123)).resolves.toMatchObject({
+      text: expect.stringContaining('Matched Name: MYANMAR YATAI INTERNATIONAL HOLDING GROUP CO., LTD.'),
+    });
+    await expect(handler.handleMessage('/full SHWE KOKKO SPECIAL ECONOMIC ZONE', 123)).resolves.toMatchObject({
+      text: expect.stringContaining('Sanctions Details'),
+    });
     await expect(handler.handleMessage('/check Yatai Smart', 123)).resolves.toMatchObject({ text: 'No Data Found!' });
     await expect(handler.handleMessage('/basic Yatai Smart', 123)).resolves.toMatchObject({ text: 'No Data Found!' });
     await expect(handler.handleMessage('/full Yatai Smart', 123)).resolves.toMatchObject({ text: 'No Data Found!' });
+    await expect(handler.handleMessage('/check Myanmar Yatai', 123)).resolves.toMatchObject({ text: 'No Data Found!' });
   });
 
   test('empty repository commands report bootstrap data status', async () => {
@@ -572,24 +620,45 @@ describe('access control and pure handlers', () => {
     const handler = new BotCommandHandler(await buildService(), createAccessControl('*'));
 
     await expect(handler.handleMessage('/search Yatai Smart', 123)).resolves.toMatchObject({ text: expect.stringMatching(/^Possible matches/) });
+    await expect(handler.handleMessage('/search Myanmar Yatai', 123)).resolves.toMatchObject({
+      text: expect.stringContaining('Matched Name: MYANMAR YATAI INTERNATIONAL HOLDING GROUP CO., LTD.'),
+    });
     await expect(handler.handleMessage('/search HPA-AN CITY', 123)).resolves.toMatchObject({ text: 'No close name candidates found. Try a more complete name.' });
     await expect(handler.handleMessage('/search', 123)).resolves.toMatchObject({ text: 'Send a name or partial name to search candidates, or /cancel.' });
     await expect(handler.handleMessage('Yatai Smart', 123)).resolves.toMatchObject({ text: expect.stringMatching(/^Possible matches/) });
+    await expect(handler.handleMessage('Myanmar Yatai', 123)).resolves.toMatchObject({
+      text: expect.stringMatching(/^Possible matches/),
+    });
   });
 
-  test('fuzzy candidate callbacks return basic and full details by record id', async () => {
+  test('fuzzy candidate search omits callback buttons', async () => {
     const handler = new BotCommandHandler(await buildService(), createAccessControl('*'));
     const searchReply = await handler.handleMessage('/search Yatai Smart', 123);
-    const [basicButton, fullButton] = searchReply.buttons[0] ?? [];
 
-    expect(basicButton).toEqual({ text: '/basic 1', callbackData: 'basic:NK-223CQDBzp8MRkdJMDiqXn3' });
-    expect(fullButton).toEqual({ text: '/full 1', callbackData: 'full:NK-223CQDBzp8MRkdJMDiqXn3' });
+    expect(searchReply.buttons).toEqual([]);
+  });
 
-    await expect(handler.handleCallback(basicButton.callbackData, 123)).resolves.toMatchObject({
-      text: expect.stringContaining('Basic Information'),
-    });
-    await expect(handler.handleCallback(fullButton.callbackData, 123)).resolves.toMatchObject({
+  test('start full deep link returns full details by record id', async () => {
+    const handler = new BotCommandHandler(await buildService(), createAccessControl('*'));
+
+    await expect(handler.handleStart(123, 'full_NK-223CQDBzp8MRkdJMDiqXn3')).resolves.toMatchObject({
       text: expect.stringContaining('Sanctions Details'),
+    });
+  });
+
+  test('start full deep link enforces access control', async () => {
+    const handler = new BotCommandHandler(await buildService(), createAccessControl('456'));
+
+    await expect(handler.handleStart(123, 'full_NK-223CQDBzp8MRkdJMDiqXn3')).resolves.toMatchObject({
+      text: 'Unauthorized.',
+    });
+  });
+
+  test('start ignores malformed full deep link payloads without crashing', async () => {
+    const handler = new BotCommandHandler(await buildService(), createAccessControl('*'));
+
+    await expect(handler.handleStart(123, 'full_')).resolves.toMatchObject({
+      text: expect.stringContaining('Send a name to search candidates'),
     });
   });
 
@@ -729,6 +798,78 @@ describe('config', () => {
         { requireToken: true },
       ),
     ).toThrow(/MAX_MESSAGE_CHARS/);
+  });
+
+  test('loads fuzzy score threshold config with default and validation', () => {
+    expect(loadConfig({ TELEGRAM_BOT_TOKEN: 'token' }, { requireToken: true })).toMatchObject({
+      minFuzzyScore: 0.8,
+    });
+
+    expect(
+      loadConfig(
+        {
+          TELEGRAM_BOT_TOKEN: 'token',
+          MIN_FUZZY_SCORE: '0.75',
+        },
+        { requireToken: true },
+      ),
+    ).toMatchObject({
+      minFuzzyScore: 0.75,
+    });
+
+    expect(
+      loadConfig(
+        {
+          TELEGRAM_BOT_TOKEN: 'token',
+          MIN_FUZZY_SCORE: ' 1 ',
+        },
+        { requireToken: true },
+      ),
+    ).toMatchObject({
+      minFuzzyScore: 1,
+    });
+
+    expect(
+      loadConfig(
+        {
+          TELEGRAM_BOT_TOKEN: 'token',
+          MIN_FUZZY_SCORE: ' ',
+        },
+        { requireToken: true },
+      ),
+    ).toMatchObject({
+      minFuzzyScore: 0.8,
+    });
+
+    expect(() =>
+      loadConfig(
+        {
+          TELEGRAM_BOT_TOKEN: 'token',
+          MIN_FUZZY_SCORE: '1.1',
+        },
+        { requireToken: true },
+      ),
+    ).toThrow(/MIN_FUZZY_SCORE/);
+
+    expect(() =>
+      loadConfig(
+        {
+          TELEGRAM_BOT_TOKEN: 'token',
+          MIN_FUZZY_SCORE: '-0.1',
+        },
+        { requireToken: true },
+      ),
+    ).toThrow(/MIN_FUZZY_SCORE/);
+
+    expect(() =>
+      loadConfig(
+        {
+          TELEGRAM_BOT_TOKEN: 'token',
+          MIN_FUZZY_SCORE: 'high',
+        },
+        { requireToken: true },
+      ),
+    ).toThrow(/MIN_FUZZY_SCORE/);
   });
 
 

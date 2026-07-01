@@ -2,6 +2,7 @@ import type { BotReply, DebarmentCandidateSearchResult, DebarmentMatch, Debarmen
 
 export interface FormatterOptions {
   maxMessageChars?: number;
+  telegramBotUsername?: string;
 }
 
 const DEFAULT_MAX_MESSAGE_CHARS = 3800;
@@ -69,18 +70,30 @@ export function formatFuzzySearchResult(result: DebarmentCandidateSearchResult, 
 
   const lines = ['Possible matches'];
   if (result.truncated) lines.push(`Showing ${result.candidates.length} of ${result.totalCandidates} candidates. Refine your search if needed.`);
-  lines.push('', 'These are fuzzy name candidates, not a Debarred verdict. Use /check, /basic, or /full with the complete name for exact lookup.');
+  const hasFullLinks = Boolean(options.telegramBotUsername?.trim());
+  const fullLinkInstruction = hasFullLinks
+    ? 'These are fuzzy name candidates, not a Debarred verdict. Tap Full to view sanctions details for a candidate.'
+    : 'These are fuzzy name candidates, not a Debarred verdict. Use /full with the complete name for exact lookup.';
+  lines.push('', fullLinkInstruction);
 
   result.candidates.forEach((candidate, index) => {
-    lines.push('', `${index + 1}. ${candidate.basic.primaryName}`);
-    if (candidate.basic.matchedName !== candidate.basic.primaryName) lines.push(`   Matched Name: ${candidate.basic.matchedName}`);
-    lines.push(`   Record ID: ${candidate.basic.recordId}`);
-    lines.push(`   Score: ${candidate.score.toFixed(2)} (${candidate.matchReason})`);
+    const fullLink = fullDeepLink(candidate.basic.recordId, options.telegramBotUsername);
+    const primaryName = hasFullLinks ? escapeHtml(candidate.basic.primaryName) : candidate.basic.primaryName;
+    lines.push('', `${index + 1}. ${primaryName}${fullLink ? `  ${fullLink}` : ''}`);
+    if (candidate.basic.matchedName !== candidate.basic.primaryName) {
+      const matchedName = hasFullLinks ? escapeHtml(candidate.basic.matchedName) : candidate.basic.matchedName;
+      lines.push(`   Matched Name: ${matchedName}`);
+    }
+    const recordId = hasFullLinks ? escapeHtml(candidate.basic.recordId) : candidate.basic.recordId;
+    const matchReason = hasFullLinks ? escapeHtml(candidate.matchReason) : candidate.matchReason;
+    lines.push(`   Record ID: ${recordId}`);
+    lines.push(`   Score: ${candidate.score.toFixed(2)} (${matchReason})`);
   });
 
   return {
     text: truncateText(lines.join('\n'), options.maxMessageChars),
-    buttons: candidateActionButtons(result.candidates),
+    buttons: [],
+    parseMode: hasFullLinks ? 'HTML' : undefined,
   };
 }
 
@@ -151,16 +164,25 @@ function actionButtons(matches: DebarmentMatch[]): ReplyButton[][] {
   });
 }
 
-function candidateActionButtons(candidates: DebarmentCandidateSearchResult['candidates']): ReplyButton[][] {
-  return candidates.map((candidate, index) => {
-    const suffix = ` ${index + 1}`;
-    return [
-      { text: `/basic${suffix}`, callbackData: `basic:${candidate.basic.recordId}` },
-      { text: `/full${suffix}`, callbackData: `full:${candidate.basic.recordId}` },
-    ];
-  });
-}
-
 function reply(text: string): BotReply {
   return { text, buttons: [] };
+}
+
+function fullDeepLink(recordId: string, botUsername: string | undefined): string {
+  const username = botUsername?.trim();
+  const payload = `full_${recordId}`;
+  if (!username || !isDeepLinkPayloadSafe(payload)) return '';
+  const url = `https://t.me/${encodeURIComponent(username)}?start=${encodeURIComponent(payload)}`;
+  return `<a href="${url}">Full</a>`;
+}
+
+function isDeepLinkPayloadSafe(payload: string): boolean {
+  return /^[A-Za-z0-9_-]{1,64}$/u.test(payload);
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;');
 }

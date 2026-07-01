@@ -9,6 +9,7 @@ export interface BootstrapSqliteOptions {
   senzingPath: string;
   targetsNestedPath: string;
   sqlitePath: string;
+  minFuzzyScore?: number;
 }
 
 export interface BootstrapSqliteResult {
@@ -34,17 +35,17 @@ async function bootstrapSqliteRepositoriesAttempt(options: BootstrapSqliteOption
   const sqliteStats = sqliteExists ? readCompatibleSqliteSenzingStats(options.sqlitePath) : undefined;
   const sqliteIsEmpty = sqliteStats === undefined || sqliteStats.records === 0;
 
-  if (!sqliteIsEmpty) return openBootstrapResult(options.sqlitePath, false);
+  if (!sqliteIsEmpty) return openBootstrapResult(options.sqlitePath, false, options.minFuzzyScore);
 
   assertCompleteStartupData(options, senzingState, targetsNestedState);
 
   if (senzingState.populated && targetsNestedState.populated) {
     await buildSqliteDatabase(options);
-    return openBootstrapResult(options.sqlitePath, false);
+    return openBootstrapResult(options.sqlitePath, false, options.minFuzzyScore);
   }
 
   if (sqliteExists && sqliteStats) {
-    return openBootstrapResult(options.sqlitePath, true);
+    return openBootstrapResult(options.sqlitePath, true, options.minFuzzyScore);
   }
 
   if (!senzingState.exists && !targetsNestedState.exists) {
@@ -56,7 +57,7 @@ async function bootstrapSqliteRepositoriesAttempt(options: BootstrapSqliteOption
     }
   }
   await createEmptySqliteDatabase(options.sqlitePath);
-  return openBootstrapResult(options.sqlitePath, true);
+  return openBootstrapResult(options.sqlitePath, true, options.minFuzzyScore);
 }
 
 async function exists(filePath: string): Promise<boolean> {
@@ -97,8 +98,8 @@ function assertCompleteStartupData(options: BootstrapSqliteOptions, senzingState
   if (!senzingState.populated && targetsNestedState.populated) throw new Error(`Missing startup data file: ${options.senzingPath}`);
 }
 
-function openBootstrapResult(sqlitePath: string, shouldAutoRefresh: boolean): BootstrapSqliteResult {
-  const senzingRepository = SqliteSenzingRepository.open(sqlitePath);
+function openBootstrapResult(sqlitePath: string, shouldAutoRefresh: boolean, minFuzzyScore?: number): BootstrapSqliteResult {
+  const senzingRepository = SqliteSenzingRepository.open(sqlitePath, { minFuzzyScore });
   try {
     const targetDetailsRepository = SqliteTargetDetailsRepository.open(sqlitePath);
     return {

@@ -172,4 +172,5 @@ export interface BotReply {
   text: string;
   buttons: ReplyButton[][];
   notifications?: BotNotification[];
+  parseMode?: 'HTML';
 }

@@ -79,6 +79,7 @@ async function createHarness(options: {
   localMetadata?: DatasetMetadata;
   remoteMetadata?: DatasetMetadata;
   downloader?: RefreshDownloader;
+  minFuzzyScore?: number;
 } = {}) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'data-refresh-'));
   const senzingPath = path.join(dir, 'senzing.json');
@@ -90,7 +91,7 @@ async function createHarness(options: {
     await fs.writeFile(refreshMetadataPath, JSON.stringify(options.localMetadata, null, 2), 'utf8');
   }
   const activeRepositories = new ActiveDebarmentRepositories(
-    await SenzingMemoryRepository.fromFile(senzingPath),
+    await SenzingMemoryRepository.fromFile(senzingPath, { minFuzzyScore: options.minFuzzyScore }),
     await TargetsNestedMemoryRepository.fromFile(targetsNestedPath),
   );
   const service = new DebarmentService(activeRepositories);
@@ -106,6 +107,7 @@ async function createHarness(options: {
     activeRepositories,
     fetchMetadata,
     downloader,
+    minFuzzyScore: options.minFuzzyScore,
     logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
   });
   return { dir, senzingPath, targetsNestedPath, refreshMetadataPath, service, activeRepositories, fetchMetadata, downloader, refresher };
@@ -255,6 +257,25 @@ describe('data refresh service', () => {
     } finally {
       copySpy.mockRestore();
     }
+  });
+
+  test('uses the configured fuzzy threshold after rebuilding indexes during refresh', async () => {
+    const local = metadata('v1', { senzing: 'old-senzing', targets: 'old-targets' });
+    const remote = metadata('v2', { senzing: 'new-senzing', targets: 'new-targets' });
+    const harness = await createHarness({ localMetadata: local, remoteMetadata: remote, minFuzzyScore: 1 });
+
+    await expect(harness.refresher.refreshNow()).resolves.toMatchObject({ status: 'updated', version: 'v2' });
+
+    await expect(harness.service.searchCandidates('NEW')).resolves.toMatchObject({
+      found: false,
+      candidates: [],
+      totalCandidates: 0,
+      truncated: false,
+    });
+    await expect(harness.service.searchCandidates('NEW PLAYER')).resolves.toMatchObject({
+      found: true,
+      candidates: [{ basic: { recordId: 'new-record' }, score: 1 }],
+    });
   });
 
   test('leaves active indexes and local files unchanged when validation or rebuild fails', async () => {
@@ -435,5 +456,70 @@ describe('admin /update handler and scheduler', () => {
     await Promise.resolve();
     expect(refreshNow).toHaveBeenCalledTimes(1);
     expect(scheduled[1]?.delay).toBe((23 * 60 + 50) * 60 * 1000);
+  });
+});
+
+describe('startup data file bootstrap', () => {
+  test('runs a startup update when a required data file is missing', async () => {
+    const { ensureDataFilesForStartup } = await import('../src/data/startupDataService.js');
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'startup-data-'));
+    const senzingPath = path.join(dir, 'senzing.json');
+    const targetsNestedPath = path.join(dir, 'targets.nested.json');
+    const refreshMetadataPath = path.join(dir, 'refresh-metadata.json');
+    await writeJsonl(senzingPath, [oldSenzingRecord]);
+    const refreshNow = vi.fn(async () => {
+      await writeJsonl(targetsNestedPath, [oldTargetRecord]);
+      return { status: 'updated' as const, version: 'v1', message: 'updated' };
+    });
+    const logger = { info: vi.fn(), warn: vi.fn() };
+
+    await expect(ensureDataFilesForStartup({ senzingPath, targetsNestedPath, refreshMetadataPath, refreshNow, logger })).resolves.toMatchObject({ status: 'updated' });
+
+    expect(refreshNow).toHaveBeenCalledTimes(1);
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('missing'), { missingFiles: [targetsNestedPath] });
+  });
+
+  test('does not run a startup update when required data files already exist', async () => {
+    const { ensureDataFilesForStartup } = await import('../src/data/startupDataService.js');
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'startup-data-'));
+    const senzingPath = path.join(dir, 'senzing.json');
+    const targetsNestedPath = path.join(dir, 'targets.nested.json');
+    const refreshMetadataPath = path.join(dir, 'refresh-metadata.json');
+    await writeJsonl(senzingPath, [oldSenzingRecord]);
+    await writeJsonl(targetsNestedPath, [oldTargetRecord]);
+    const refreshNow = vi.fn(async () => ({ status: 'updated' as const, version: 'v1', message: 'updated' }));
+
+    await expect(ensureDataFilesForStartup({ senzingPath, targetsNestedPath, refreshMetadataPath, refreshNow })).resolves.toBeUndefined();
+
+    expect(refreshNow).not.toHaveBeenCalled();
+  });
+
+  test('fails startup when the required update fails', async () => {
+    const { ensureDataFilesForStartup } = await import('../src/data/startupDataService.js');
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'startup-data-'));
+    const senzingPath = path.join(dir, 'senzing.json');
+    const targetsNestedPath = path.join(dir, 'targets.nested.json');
+    const refreshMetadataPath = path.join(dir, 'refresh-metadata.json');
+    const refreshNow = vi.fn(async () => ({ status: 'failed' as const, message: 'Data refresh failed: offline', error: 'offline' }));
+
+    await expect(ensureDataFilesForStartup({ senzingPath, targetsNestedPath, refreshMetadataPath, refreshNow })).rejects.toThrow(/Startup data update failed: offline/u);
+  });
+
+  test('downloads data when metadata is current but a required local data file is missing', async () => {
+    const current = metadata('v1', { senzing: 'old-senzing', targets: 'old-targets' });
+    const harness = await createHarness({
+      localMetadata: current,
+      remoteMetadata: current,
+      downloader: vi.fn(async (url, destination) => {
+        if (url.includes('senzing')) await writeJsonl(destination, [oldSenzingRecord]);
+        else await writeJsonl(destination, [oldTargetRecord]);
+      }),
+    });
+    await fs.rm(harness.targetsNestedPath);
+
+    await expect(harness.refresher.refreshNow()).resolves.toMatchObject({ status: 'updated', version: 'v1' });
+
+    expect(harness.downloader).toHaveBeenCalledTimes(2);
+    await expect(fs.access(harness.targetsNestedPath)).resolves.toBeUndefined();
   });
 });

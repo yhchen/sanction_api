@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { describe, expect, test } from 'vitest';
+import { loadConfig } from '../src/config.js';
 
 interface PackageJson {
   scripts?: Record<string, string>;
@@ -22,5 +23,26 @@ describe('package scripts', () => {
     const packageJson = await readPackageJson();
 
     expect(packageJson.scripts?.['db:build']).toBe('tsx src/scripts/buildSqlite.ts');
+  });
+
+  test('provides PM2-managed production scripts', async () => {
+    const packageJson = await readPackageJson();
+
+    expect(packageJson.scripts).toMatchObject({
+      'pm2:start': 'npm run build && pm2 startOrReload ecosystem.config.cjs --update-env',
+      'pm2:restart': 'npm run build && pm2 restart ecosystem.config.cjs --update-env',
+      'pm2:stop': 'pm2 stop sanction-api-telegram-bot',
+      'pm2:status': 'pm2 status sanction-api-telegram-bot',
+      'pm2:logs': 'pm2 logs sanction-api-telegram-bot',
+    });
+  });
+
+  test('loads optional Telegram bot username for deep links', () => {
+    const config = loadConfig({
+      TELEGRAM_BOT_TOKEN: 'token',
+      TELEGRAM_BOT_USERNAME: 'ExampleDebarmentBot',
+    }, { requireToken: true });
+
+    expect(config.telegramBotUsername).toBe('ExampleDebarmentBot');
   });
 });

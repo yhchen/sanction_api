@@ -55,13 +55,16 @@ chmod 600 .env
 
 ```dotenv
 TELEGRAM_BOT_TOKEN=replace-with-new-token-from-BotFather
+TELEGRAM_BOT_USERNAME=
 ALLOWED_TELEGRAM_USERS=
 ADMIN_TELEGRAM_USERS=
 APPROVED_TELEGRAM_USERS_PATH=./approved-users.json
 SENZING_PATH=./senzing.json
 TARGETS_NESTED_PATH=./targets.nested.json
+SQLITE_PATH=./sanction.sqlite
 REFRESH_METADATA_PATH=./refresh-metadata.json
 REFRESH_SCHEDULE_TIME=05:00
+MIN_FUZZY_SCORE=0.8
 MAX_RESULTS=5
 MAX_MESSAGE_CHARS=3800
 ```
@@ -69,9 +72,12 @@ MAX_MESSAGE_CHARS=3800
 说明：
 
 - `TELEGRAM_BOT_TOKEN`：真实 token 只写在本机或服务器 `.env` 中，不要提交。
+- `TELEGRAM_BOT_USERNAME`：Bot 用户名；配置后模糊搜索候选会显示可点击的 `Full` deep link。
 - `ALLOWED_TELEGRAM_USERS`：留空，表示使用管理员批准模式。
 - `ADMIN_TELEGRAM_USERS`：第一次启动时可以先留空，用来获取管理员自己的 Telegram 数字 ID。
 - `APPROVED_TELEGRAM_USERS_PATH`：机器人批准用户后会写入这个 JSON 文件。
+- `MIN_FUZZY_SCORE`：模糊候选搜索最低分数阈值，默认 `0.8`；低于该分数的候选不会显示。
+- `SQLITE_PATH`：SQLite 查询库路径；启动和刷新时会从 JSONL 数据构建或替换该文件。
 
 当前项目不会自动加载 `.env`，启动前需要把 `.env` 导入 shell 环境：
 
@@ -141,14 +147,14 @@ node dist/index.js
 机器人启动时会自动向 Telegram 注册命令菜单，不需要在 `@BotFather` 中手工配置。菜单中只显示以下快速指令：
 
 - `/start` - 显示帮助和访问状态
-- `/check` - 查询完整名称的 Debarred 状态
-- `/search` - 按名称或部分名称搜索候选
+- `/check` - 查询完整主名称或完整别名的 Debarred 状态
+- `/search` - 按主名称或别名的部分输入搜索候选
 - `/basic` - 显示基础记录信息
 - `/full` - 显示完整制裁详情
 
 `/request`、`/approve` 和管理员专用 `/update` 不显示在命令菜单中，但命令仍然可用。未授权用户通过 `/start` 的提示知道可以发送 `/request` 申请访问；管理员收到申请后仍然可以手动发送 `/approve <telegram_user_id>`，或回复申请消息 `/approve`。
 
-从菜单选择 `/check`、`/basic` 或 `/full` 时，Telegram 只会发送命令本身；机器人会提示用户继续发送完整名称。选择 `/search` 时，机器人会提示用户发送名称或部分名称。下一条普通文本会按所选模式查询并清除等待状态。如果用户在输入名称前又选择另一个查询命令，新命令会覆盖旧等待模式。发送 `/cancel` 可以取消当前等待输入模式。`/cancel` 不显示在命令菜单中。
+从菜单选择 `/check`、`/basic` 或 `/full` 时，Telegram 只会发送命令本身；机器人会提示用户继续发送完整主名称或完整别名。选择 `/search` 时，机器人会提示用户发送主名称或别名的部分输入。下一条普通文本会按所选模式查询并清除等待状态。如果用户在输入名称前又选择另一个查询命令，新命令会覆盖旧等待模式。发送 `/cancel` 可以取消当前等待输入模式。`/cancel` 不显示在命令菜单中。
 
 如果启动时命令菜单注册失败，机器人会启动失败并退出。此时优先检查 `TELEGRAM_BOT_TOKEN`、网络连接和 Telegram API 可用性。
 
@@ -190,20 +196,23 @@ node dist/index.js
 | 操作 | Telegram 输入示例 |
 | --- | --- |
 | 查看帮助和访问状态 | `/start` |
-| 查询完整名称 | `/check YATAI SMART INDUSTRIAL NEW CITY` |
+| 查询完整主名称 | `/check YATAI SMART INDUSTRIAL NEW CITY` |
+| 查询完整别名 | `/check YATAI NEW CITY` |
 | 搜索候选名称 | `/search Yatai Smart` |
+| 搜索别名候选 | `/search Myanmar Yatai` |
 | 纯文本候选搜索 | `Yatai Smart` |
 | 查询基础信息 | `/basic YATAI SMART INDUSTRIAL NEW CITY` |
 | 查询完整制裁详情 | `/full YATAI SMART INDUSTRIAL NEW CITY` |
-| 菜单查询 | 选择 `/check`、`/basic` 或 `/full` 后，再发送完整名称；选择 `/search` 后发送部分名称 |
+| 菜单查询 | 选择 `/check`、`/basic` 或 `/full` 后，再发送完整主名称或完整别名；选择 `/search` 后发送主名称或别名的部分输入 |
 | 取消等待输入 | `/cancel` |
-| 精确完整名称状态查询 | `/check YATAI SMART INDUSTRIAL NEW CITY` |
+| 精确完整主名称状态查询 | `/check YATAI SMART INDUSTRIAL NEW CITY` |
+| 精确完整别名状态查询 | `/check YATAI NEW CITY` |
 | 管理员刷新数据 | `/update` |
 
 查询规则：
 
-- `/check`、`/basic`、`/full` 必须输入完整名称并保持精确匹配。
-- `/search` 和无等待模式下的普通文本支持部分名称的模糊候选搜索。
+- `/check`、`/basic`、`/full` 必须输入完整主名称或完整别名并保持精确匹配。
+- `/search` 和无等待模式下的普通文本支持主名称或别名的部分输入做模糊候选搜索。
 - 模糊候选搜索只搜索 `NAMES[].NAME_FULL`，不搜索地址、编号或制裁详情全文。
 - 模糊候选搜索只返回可能匹配的名称候选，不直接显示为 `Debarred`。只有精确查询命中的、风险主题包含 `debarment` 的记录会显示为 `Debarred`。
 
@@ -226,7 +235,7 @@ https://data.opensanctions.org/datasets/latest/debarment/index.json
 - 先比较远端 `senzing.json` 和 `targets.nested.json` checksum 与本地 `REFRESH_METADATA_PATH`。
 - checksum 未变化时，不下载完整文件，直接回复数据已是最新。
 - 任一目标文件变化时，从同一 metadata version 下载两个文件到临时路径。
-- 下载后先验证并重建内存索引；成功后才替换本地文件、写入 metadata，并热切换查询数据。
+- 下载后先验证，并在临时目录构建 SQLite 查询库；成功后才替换本地文件、写入 metadata，并热切换查询数据。
 - metadata 获取、下载、验证或重建失败时，旧本地文件和旧查询索引继续使用。
 - 如果定时任务正在刷新，管理员手动 `/update` 会收到已有刷新正在运行的回复，不会启动第二条流水线。
 

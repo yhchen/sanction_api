@@ -116,6 +116,30 @@ describe('SQLite repositories', () => {
     });
   });
 
+  test('search filters SQLite candidates below the configured score threshold', async () => {
+    const sqlitePath = await buildTempSqlitePath();
+    const strictRepository = SqliteSenzingRepository.open(sqlitePath, { minFuzzyScore: 0.96 });
+    const relaxedRepository = SqliteSenzingRepository.open(sqlitePath, { minFuzzyScore: 0.55 });
+    const targetDetailsRepository = SqliteTargetDetailsRepository.open(sqlitePath);
+    try {
+      const strictService = new DebarmentService(strictRepository, targetDetailsRepository);
+      const relaxedService = new DebarmentService(relaxedRepository, targetDetailsRepository);
+
+      await expect(strictService.searchCandidates('Yatai Smart')).resolves.toMatchObject({
+        found: false,
+        candidates: [],
+      });
+      await expect(relaxedService.searchCandidates('Yatai Smart')).resolves.toMatchObject({
+        found: true,
+        candidates: [{ basic: { recordId: 'NK-223CQDBzp8MRkdJMDiqXn3' } }],
+      });
+    } finally {
+      targetDetailsRepository.close();
+      relaxedRepository.close();
+      strictRepository.close();
+    }
+  });
+
   test('identifier-like input returns no candidates', async () => {
     await withSqliteService(async (service) => {
       await expect(service.searchCandidates('PW2XZT68KVW8')).resolves.toMatchObject({

@@ -1,5 +1,5 @@
 import Database from 'better-sqlite3';
-import { normalizedTokens, scoreSearchableName } from '../domain/nameScoring.js';
+import { DEFAULT_MIN_FUZZY_SCORE, normalizedTokens, scoreSearchableName } from '../domain/nameScoring.js';
 import { normalizeName } from '../domain/normalize.js';
 import type {
   RepositoryStats,
@@ -37,16 +37,24 @@ interface SearchableNameMatch extends SenzingNameMatch {
   normalizedTokens: string[];
 }
 
-export class SqliteSenzingRepository implements SenzingLookupRepository {
-  private constructor(private readonly db: Database.Database) {}
+export interface SqliteRepositoryOptions {
+  minFuzzyScore?: number;
+}
 
-  static open(sqlitePath: string): SqliteSenzingRepository {
+export class SqliteSenzingRepository implements SenzingLookupRepository {
+  private readonly minFuzzyScore: number;
+
+  private constructor(private readonly db: Database.Database, options: SqliteRepositoryOptions = {}) {
+    this.minFuzzyScore = options.minFuzzyScore ?? DEFAULT_MIN_FUZZY_SCORE;
+  }
+
+  static open(sqlitePath: string, options: SqliteRepositoryOptions = {}): SqliteSenzingRepository {
     const db = new Database(sqlitePath, { readonly: true, fileMustExist: true });
     if (!validateSqliteSchema(db)) {
       db.close();
       throw new Error('SQLite schema is incompatible.');
     }
-    return new SqliteSenzingRepository(db);
+    return new SqliteSenzingRepository(db, options);
   }
 
   findByName(name: string): SenzingNameMatch[] {
@@ -103,7 +111,7 @@ export class SqliteSenzingRepository implements SenzingLookupRepository {
     const bestByRecordId = new Map<string, SenzingNameCandidate>();
     for (const row of rows) {
       const match = toSearchableNameMatch(row);
-      const score = scoreSearchableName(normalizedQuery, queryTokens, match);
+      const score = scoreSearchableName(normalizedQuery, queryTokens, match, this.minFuzzyScore);
       if (score === undefined) continue;
 
       const candidate = {

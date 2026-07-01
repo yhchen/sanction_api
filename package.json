@@ -8,6 +8,11 @@
     "dev": "tsx --env-file=.env.develop src/index.ts",
     "db:build": "tsx src/scripts/buildSqlite.ts",
     "build": "tsc -p tsconfig.build.json",
+    "pm2:start": "npm run build && pm2 startOrReload ecosystem.config.cjs --update-env",
+    "pm2:restart": "npm run build && pm2 restart ecosystem.config.cjs --update-env",
+    "pm2:stop": "pm2 stop sanction-api-telegram-bot",
+    "pm2:status": "pm2 status sanction-api-telegram-bot",
+    "pm2:logs": "pm2 logs sanction-api-telegram-bot",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest"

@@ -21,6 +21,7 @@ async function main(): Promise<void> {
       senzingPath: config.senzingPath,
       targetsNestedPath: config.targetsNestedPath,
       sqlitePath: config.sqlitePath,
+      minFuzzyScore: config.minFuzzyScore,
     });
     console.info('Loaded SQLite senzing index:', bootstrap.senzingRepository.stats());
     console.info('Loaded SQLite targets.nested details:', bootstrap.targetDetailsRepository.stats());
@@ -41,9 +42,11 @@ async function main(): Promise<void> {
       sqlitePath: config.sqlitePath,
       refreshMetadataPath: config.refreshMetadataPath,
       activeRepositories,
+      minFuzzyScore: config.minFuzzyScore,
     });
     const handler = new BotCommandHandler(service, accessControl, approvedUsersRepository, {
       maxMessageChars: config.maxMessageChars,
+      telegramBotUsername: config.telegramBotUsername,
     }, dataRefreshService);
     const bot = createBot(config.telegramBotToken, handler);
 
