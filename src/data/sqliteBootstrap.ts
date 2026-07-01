@@ -18,14 +18,29 @@ export interface BootstrapSqliteResult {
   close(): void;
 }
 
+interface FileState {
+  exists: boolean;
+  populated: boolean;
+}
+
 export async function bootstrapSqliteRepositories(options: BootstrapSqliteOptions): Promise<BootstrapSqliteResult> {
-  if (await exists(options.sqlitePath)) {
+  const sqliteExists = await exists(options.sqlitePath);
+  const senzingState = await fileState(options.senzingPath);
+  const targetsNestedState = await fileState(options.targetsNestedPath);
+  const sqliteStats = sqliteExists ? readSqliteSenzingStats(options.sqlitePath) : undefined;
+  const sqliteIsEmpty = sqliteStats === undefined || sqliteStats.records === 0;
+
+  if (!sqliteIsEmpty) return openBootstrapResult(options.sqlitePath, false, sqliteStats);
+
+  assertCompleteStartupData(options, senzingState, targetsNestedState);
+
+  if (senzingState.populated && targetsNestedState.populated) {
+    await buildSqliteDatabase(options);
     return openBootstrapResult(options.sqlitePath, false);
   }
 
-  if (await exists(options.senzingPath) && await exists(options.targetsNestedPath)) {
-    await buildSqliteDatabase(options);
-    return openBootstrapResult(options.sqlitePath, false);
+  if (sqliteExists) {
+    return openBootstrapResult(options.sqlitePath, true, sqliteStats);
   }
 
   await createEmptyJsonl(options.senzingPath);
@@ -44,16 +59,33 @@ async function exists(filePath: string): Promise<boolean> {
   }
 }
 
+async function fileState(filePath: string): Promise<FileState> {
+  try {
+    const stats = await fs.stat(filePath);
+    return { exists: true, populated: stats.size > 0 };
+  } catch (error: unknown) {
+    if (isNodeError(error) && error.code === 'ENOENT') return { exists: false, populated: false };
+    throw error;
+  }
+}
+
 async function createEmptyJsonl(filePath: string): Promise<void> {
   if (await exists(filePath)) return;
   await fs.mkdir(path.dirname(filePath), { recursive: true });
   await fs.writeFile(filePath, '', 'utf8');
 }
 
-function openBootstrapResult(sqlitePath: string, shouldAutoRefresh: boolean): BootstrapSqliteResult {
+function assertCompleteStartupData(options: BootstrapSqliteOptions, senzingState: FileState, targetsNestedState: FileState): void {
+  if (!senzingState.exists && targetsNestedState.exists) throw new Error(`Missing startup data file: ${options.senzingPath}`);
+  if (senzingState.exists && !targetsNestedState.exists) throw new Error(`Missing startup data file: ${options.targetsNestedPath}`);
+  if (senzingState.populated && !targetsNestedState.populated) throw new Error(`Missing startup data file: ${options.targetsNestedPath}`);
+  if (!senzingState.populated && targetsNestedState.populated) throw new Error(`Missing startup data file: ${options.senzingPath}`);
+}
+
+function openBootstrapResult(sqlitePath: string, shouldAutoRefresh: boolean, stats?: RepositoryStats): BootstrapSqliteResult {
   const senzingRepository = SqliteSenzingRepository.open(sqlitePath);
   try {
-    const senzingStats = readSqliteSenzingStats(sqlitePath);
+    const senzingStats = stats ?? readSqliteSenzingStats(sqlitePath);
     senzingRepository.stats = () => senzingStats;
     const targetDetailsRepository = SqliteTargetDetailsRepository.open(sqlitePath);
     return {

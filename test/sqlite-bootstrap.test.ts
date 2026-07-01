@@ -51,4 +51,45 @@ describe('SQLite bootstrap', () => {
       result.close();
     }
   });
+
+  test('rebuilds an existing empty SQLite database after JSONL startup data is populated', async () => {
+    const paths = await tempBootstrapPaths();
+
+    const emptyResult = await bootstrapSqliteRepositories(paths);
+    try {
+      expect(emptyResult.shouldAutoRefresh).toBe(true);
+      expect(emptyResult.senzingRepository.stats()).toEqual({ records: 0, indexedNames: 0 });
+    } finally {
+      emptyResult.close();
+    }
+
+    await fs.copyFile(senzingFixture, paths.senzingPath);
+    await fs.copyFile(targetsNestedFixture, paths.targetsNestedPath);
+
+    const populatedResult = await bootstrapSqliteRepositories(paths);
+    try {
+      expect(populatedResult.shouldAutoRefresh).toBe(false);
+      expect(populatedResult.senzingRepository.stats().records).toBe(5);
+    } finally {
+      populatedResult.close();
+    }
+  });
+
+  test('throws when senzing JSONL exists but targets.nested JSONL is missing', async () => {
+    const paths = await tempBootstrapPaths();
+    await fs.mkdir(path.dirname(paths.senzingPath), { recursive: true });
+    await fs.copyFile(senzingFixture, paths.senzingPath);
+
+    await expect(bootstrapSqliteRepositories(paths)).rejects.toThrow(`Missing startup data file: ${paths.targetsNestedPath}`);
+  });
+
+  test('throws when targets.nested JSONL exists but senzing JSONL is missing with an empty SQLite database', async () => {
+    const paths = await tempBootstrapPaths();
+    const emptyResult = await bootstrapSqliteRepositories(paths);
+    emptyResult.close();
+    await fs.rm(paths.senzingPath);
+    await fs.copyFile(targetsNestedFixture, paths.targetsNestedPath);
+
+    await expect(bootstrapSqliteRepositories(paths)).rejects.toThrow(`Missing startup data file: ${paths.senzingPath}`);
+  });
 });
