@@ -22,6 +22,10 @@ export interface LaunchableBot extends BotCommandRegistrar {
   launch(): Promise<unknown>;
 }
 
+export interface StartBotLogger {
+  warn(message?: unknown, ...optionalParams: unknown[]): void;
+}
+
 export function createBot(token: string, handler: BotCommandHandler): Telegraf<Context> {
   const bot = new Telegraf(token);
 
@@ -51,8 +55,12 @@ export async function registerBotCommands(bot: BotCommandRegistrar): Promise<voi
   await bot.telegram.setMyCommands(VISIBLE_BOT_COMMANDS);
 }
 
-export async function startBot(bot: LaunchableBot): Promise<void> {
-  await registerBotCommands(bot);
+export async function startBot(bot: LaunchableBot, logger: StartBotLogger = console): Promise<void> {
+  try {
+    await registerBotCommands(bot);
+  } catch (error: unknown) {
+    logger.warn('Telegram command menu registration failed; launching bot without menu update:', error);
+  }
   await bot.launch();
 }
 

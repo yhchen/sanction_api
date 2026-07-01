@@ -29,8 +29,11 @@ describe('Telegram command menu registration', () => {
     await expect(registerBotCommands(bot)).rejects.toThrow('registration failed');
   });
 
-  test('does not launch when command menu registration fails', async () => {
+  test('launches when command menu registration fails', async () => {
     const events: string[] = [];
+    const logger = {
+      warn: vi.fn(),
+    };
     const bot = {
       telegram: {
         setMyCommands: vi.fn(async () => {
@@ -43,10 +46,11 @@ describe('Telegram command menu registration', () => {
       }),
     };
 
-    await expect(startBot(bot)).rejects.toThrow('registration failed');
+    await startBot(bot, logger);
 
-    expect(events).toEqual(['setMyCommands']);
-    expect(bot.launch).not.toHaveBeenCalled();
+    expect(events).toEqual(['setMyCommands', 'launch']);
+    expect(bot.launch).toHaveBeenCalled();
+    expect(logger.warn).toHaveBeenCalledWith('Telegram command menu registration failed; launching bot without menu update:', expect.any(Error));
   });
 
   test('builds Telegram reply options for parse mode without buttons', () => {
