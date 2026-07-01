@@ -213,6 +213,50 @@ describe('data refresh service', () => {
     }
   });
 
+  test('restores local files and active data when SQLite backup copy fails', async () => {
+    const harness = await createHarness({
+      localMetadata: metadata('v1', { senzing: 'old-senzing', targets: 'old-targets' }),
+      remoteMetadata: metadata('v2', { senzing: 'new-senzing', targets: 'new-targets' }),
+    });
+    const sqlitePath = path.join(harness.dir, 'sanction.sqlite');
+    await buildSqliteDatabase({
+      senzingPath: harness.senzingPath,
+      targetsNestedPath: harness.targetsNestedPath,
+      sqlitePath,
+    });
+    const oldSqliteBytes = await fs.readFile(sqlitePath);
+    const originalCopyFile = fs.copyFile;
+    const copySpy = vi.spyOn(fs, 'copyFile').mockImplementation(async (source, destination, mode) => {
+      if (String(source) === sqlitePath && String(destination).includes('.refresh-backup-')) {
+        throw new Error('sqlite backup unavailable');
+      }
+      return originalCopyFile(source, destination, mode);
+    });
+    const refresher = new DataRefreshService({
+      senzingPath: harness.senzingPath,
+      targetsNestedPath: harness.targetsNestedPath,
+      refreshMetadataPath: harness.refreshMetadataPath,
+      sqlitePath,
+      activeRepositories: harness.activeRepositories,
+      fetchMetadata: harness.fetchMetadata,
+      downloader: harness.downloader,
+      logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    });
+
+    try {
+      await expect(refresher.refreshNow()).resolves.toMatchObject({ status: 'failed', error: expect.stringContaining('sqlite backup unavailable') });
+
+      await expect(harness.service.check('OLD PLAYER')).resolves.toMatchObject({ found: true });
+      await expect(harness.service.check('NEW PLAYER')).resolves.toMatchObject({ found: false });
+      await expect(fs.readFile(harness.senzingPath, 'utf8')).resolves.toBe(oldSenzingJsonl);
+      await expect(fs.readFile(harness.targetsNestedPath, 'utf8')).resolves.toBe(oldTargetsJsonl);
+      await expect(fs.readFile(harness.refreshMetadataPath, 'utf8')).resolves.toContain('v1');
+      await expect(fs.readFile(sqlitePath)).resolves.toEqual(oldSqliteBytes);
+    } finally {
+      copySpy.mockRestore();
+    }
+  });
+
   test('leaves active indexes and local files unchanged when validation or rebuild fails', async () => {
     const harness = await createHarness({
       localMetadata: metadata('v1', { senzing: 'old-senzing', targets: 'old-targets' }),
