@@ -36,13 +36,23 @@ const oldSenzingJsonl = jsonl([oldSenzingRecord]);
 const newSenzingJsonl = jsonl([newSenzingRecord]);
 const oldTargetsJsonl = jsonl([oldTargetRecord]);
 const newTargetsJsonl = jsonl([newTargetRecord]);
+const oldSecuritiesCsv = [
+  '"caption","lei","perm_id","isins","ric","countries","sanctioned","eo_14071","public","id","url","datasets","risk_datasets","aliases","referents"',
+  '"OLD SECURITY CO","","","","","us","t","f","f","old-security","https://www.opensanctions.org/entities/old-security","us_ofac_sdn","us_ofac_sdn","OLD SECURITY CO","old-ref"',
+].join('\n') + '\n';
+const newSecuritiesCsv = [
+  '"caption","lei","perm_id","isins","ric","countries","sanctioned","eo_14071","public","id","url","datasets","risk_datasets","aliases","referents"',
+  '"NEW SECURITY CO","","","RU000A0JX0J2","","ru","f","t","f","new-security","https://www.opensanctions.org/entities/new-security","ru_nsd_isin","ru_nsd_isin","NEW SECURITY CO","new-ref"',
+].join('\n') + '\n';
 
-function metadata(version: string, checksums: { senzing: string; targets: string }): DatasetMetadata {
+function metadata(version: string, checksums: { senzing: string; targets: string; securities?: string }): DatasetMetadata {
+  const securitiesChecksum = checksums.securities ?? (version === 'v2' ? 'new-securities' : 'same-securities');
   return {
     version,
     resources: {
       'senzing.json': { name: 'senzing.json', url: `https://example.test/${version}/senzing.json`, checksum: checksumAlias(checksums.senzing) },
       'targets.nested.json': { name: 'targets.nested.json', url: `https://example.test/${version}/targets.nested.json`, checksum: checksumAlias(checksums.targets) },
+      'securities.csv': { name: 'securities.csv', url: `https://example.test/${version}/securities.csv`, checksum: checksumAlias(securitiesChecksum) },
     },
   };
 }
@@ -55,6 +65,9 @@ function checksumAlias(value: string): string {
     'old-targets': sha1(oldTargetsJsonl),
     'new-senzing': sha1(newSenzingJsonl),
     'new-targets': sha1(newTargetsJsonl),
+    'same-securities': sha1(oldSecuritiesCsv),
+    'old-securities': sha1(oldSecuritiesCsv),
+    'new-securities': sha1(newSecuritiesCsv),
   };
   return aliases[value] ?? value;
 }
@@ -84,9 +97,11 @@ async function createHarness(options: {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'data-refresh-'));
   const senzingPath = path.join(dir, 'senzing.json');
   const targetsNestedPath = path.join(dir, 'targets.nested.json');
+  const securitiesPath = path.join(dir, 'securities.csv');
   const refreshMetadataPath = path.join(dir, 'refresh-metadata.json');
   await writeJsonl(senzingPath, [oldSenzingRecord]);
   await writeJsonl(targetsNestedPath, [oldTargetRecord]);
+  await fs.writeFile(securitiesPath, oldSecuritiesCsv, 'utf8');
   if (options.localMetadata) {
     await fs.writeFile(refreshMetadataPath, JSON.stringify(options.localMetadata, null, 2), 'utf8');
   }
@@ -98,11 +113,13 @@ async function createHarness(options: {
   const fetchMetadata: RefreshMetadataFetcher = vi.fn(async () => options.remoteMetadata ?? metadata('v1', { senzing: 'same-senzing', targets: 'same-targets' }));
   const downloader: RefreshDownloader = options.downloader ?? vi.fn(async (url, destination) => {
     if (url.includes('senzing')) await writeJsonl(destination, [newSenzingRecord]);
-    else await writeJsonl(destination, [newTargetRecord]);
+    else if (url.includes('targets')) await writeJsonl(destination, [newTargetRecord]);
+    else await fs.writeFile(destination, newSecuritiesCsv, 'utf8');
   });
   const refresher = new DataRefreshService({
     senzingPath,
     targetsNestedPath,
+    securitiesPath,
     refreshMetadataPath,
     activeRepositories,
     fetchMetadata,
@@ -110,7 +127,7 @@ async function createHarness(options: {
     minFuzzyScore: options.minFuzzyScore,
     logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
   });
-  return { dir, senzingPath, targetsNestedPath, refreshMetadataPath, service, activeRepositories, fetchMetadata, downloader, refresher };
+  return { dir, senzingPath, targetsNestedPath, securitiesPath, refreshMetadataPath, service, activeRepositories, fetchMetadata, downloader, refresher };
 }
 
 describe('data refresh service', () => {
@@ -132,15 +149,48 @@ describe('data refresh service', () => {
 
     await expect(harness.refresher.refreshNow()).resolves.toMatchObject({ status: 'updated', version: 'v2' });
 
-    expect(harness.downloader).toHaveBeenCalledTimes(2);
+    expect(harness.downloader).toHaveBeenCalledTimes(3);
     expect((harness.downloader as ReturnType<typeof vi.fn>).mock.calls.map((call) => path.basename(call[1]))).toEqual(
-      expect.arrayContaining([expect.stringContaining('senzing.json'), expect.stringContaining('targets.nested.json')]),
+      expect.arrayContaining([
+        expect.stringContaining('senzing.json'),
+        expect.stringContaining('targets.nested.json'),
+        expect.stringContaining('securities.csv'),
+      ]),
     );
     await expect(harness.service.check('OLD PLAYER')).resolves.toMatchObject({ found: false });
     await expect(harness.service.check('NEW PLAYER')).resolves.toMatchObject({ found: true });
     await expect(fs.readFile(harness.senzingPath, 'utf8')).resolves.toContain('NEW PLAYER');
     await expect(fs.readFile(harness.targetsNestedPath, 'utf8')).resolves.toContain('NEW');
+    await expect(fs.readFile(harness.securitiesPath, 'utf8')).resolves.toContain('NEW SECURITY CO');
     await expect(fs.readFile(harness.refreshMetadataPath, 'utf8')).resolves.toContain('v2');
+  });
+
+  test('downloads changed securities CSV and rebuilds SQLite results', async () => {
+    const harness = await createHarness({
+      localMetadata: metadata('v1', { senzing: 'old-senzing', targets: 'old-targets', securities: 'old-securities' }),
+      remoteMetadata: metadata('v2', { senzing: 'old-senzing', targets: 'old-targets', securities: 'new-securities' }),
+      downloader: vi.fn(async (url, destination) => {
+        if (url.includes('senzing')) await writeJsonl(destination, [oldSenzingRecord]);
+        else if (url.includes('targets')) await writeJsonl(destination, [oldTargetRecord]);
+        else await fs.writeFile(destination, newSecuritiesCsv, 'utf8');
+      }),
+    });
+    const sqlitePath = path.join(harness.dir, 'sanction.sqlite');
+    const refresher = new DataRefreshService({
+      senzingPath: harness.senzingPath,
+      targetsNestedPath: harness.targetsNestedPath,
+      securitiesPath: harness.securitiesPath,
+      refreshMetadataPath: harness.refreshMetadataPath,
+      sqlitePath,
+      activeRepositories: harness.activeRepositories,
+      fetchMetadata: harness.fetchMetadata,
+      downloader: harness.downloader,
+      logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    });
+
+    await expect(refresher.refreshNow()).resolves.toMatchObject({ status: 'updated', version: 'v2' });
+    await expect(harness.service.check('NEW SECURITY CO')).resolves.toMatchObject({ found: true });
+    await expect(fs.readFile(harness.securitiesPath, 'utf8')).resolves.toContain('NEW SECURITY CO');
   });
 
   test('builds and swaps SQLite repositories when sqlitePath is configured', async () => {
@@ -152,6 +202,7 @@ describe('data refresh service', () => {
     const refresher = new DataRefreshService({
       senzingPath: harness.senzingPath,
       targetsNestedPath: harness.targetsNestedPath,
+      securitiesPath: harness.securitiesPath,
       refreshMetadataPath: harness.refreshMetadataPath,
       sqlitePath,
       activeRepositories: harness.activeRepositories,
@@ -182,6 +233,7 @@ describe('data refresh service', () => {
     await buildSqliteDatabase({
       senzingPath: harness.senzingPath,
       targetsNestedPath: harness.targetsNestedPath,
+      securitiesPath: harness.securitiesPath,
       sqlitePath,
     });
     const oldSenzingRepository = SqliteSenzingRepository.open(sqlitePath);
@@ -191,6 +243,7 @@ describe('data refresh service', () => {
     const refresher = new DataRefreshService({
       senzingPath: harness.senzingPath,
       targetsNestedPath: harness.targetsNestedPath,
+      securitiesPath: harness.securitiesPath,
       refreshMetadataPath: harness.refreshMetadataPath,
       sqlitePath,
       activeRepositories,
@@ -224,6 +277,7 @@ describe('data refresh service', () => {
     await buildSqliteDatabase({
       senzingPath: harness.senzingPath,
       targetsNestedPath: harness.targetsNestedPath,
+      securitiesPath: harness.securitiesPath,
       sqlitePath,
     });
     const oldSqliteBytes = await fs.readFile(sqlitePath);
@@ -237,6 +291,7 @@ describe('data refresh service', () => {
     const refresher = new DataRefreshService({
       senzingPath: harness.senzingPath,
       targetsNestedPath: harness.targetsNestedPath,
+      securitiesPath: harness.securitiesPath,
       refreshMetadataPath: harness.refreshMetadataPath,
       sqlitePath,
       activeRepositories: harness.activeRepositories,
@@ -252,6 +307,7 @@ describe('data refresh service', () => {
       await expect(harness.service.check('NEW PLAYER')).resolves.toMatchObject({ found: false });
       await expect(fs.readFile(harness.senzingPath, 'utf8')).resolves.toBe(oldSenzingJsonl);
       await expect(fs.readFile(harness.targetsNestedPath, 'utf8')).resolves.toBe(oldTargetsJsonl);
+      await expect(fs.readFile(harness.securitiesPath, 'utf8')).resolves.toBe(oldSecuritiesCsv);
       await expect(fs.readFile(harness.refreshMetadataPath, 'utf8')).resolves.toContain('v1');
       await expect(fs.readFile(sqlitePath)).resolves.toEqual(oldSqliteBytes);
     } finally {
@@ -284,7 +340,8 @@ describe('data refresh service', () => {
       remoteMetadata: metadata('v2', { senzing: 'new-senzing', targets: 'new-targets' }),
       downloader: vi.fn(async (url, destination) => {
         if (url.includes('senzing')) await fs.writeFile(destination, '{not-jsonl}\n', 'utf8');
-        else await writeJsonl(destination, [newTargetRecord]);
+        else if (url.includes('targets')) await writeJsonl(destination, [newTargetRecord]);
+        else await fs.writeFile(destination, newSecuritiesCsv, 'utf8');
       }),
     });
 
@@ -339,6 +396,7 @@ describe('data refresh service', () => {
     await expect(harness.service.check('NEW PLAYER')).resolves.toMatchObject({ found: true });
     await expect(fs.readFile(harness.senzingPath, 'utf8')).resolves.toContain('NEW PLAYER');
     await expect(fs.readFile(harness.targetsNestedPath, 'utf8')).resolves.toContain('NEW');
+    await expect(fs.readFile(harness.securitiesPath, 'utf8')).resolves.toContain('NEW SECURITY CO');
     await expect(fs.readFile(harness.refreshMetadataPath, 'utf8')).resolves.toContain('v2');
     rmSpy.mockRestore();
   });
@@ -374,7 +432,9 @@ describe('data refresh service', () => {
           releaseFirstDownload = release;
         });
       }
-      await writeJsonl(destination, destination.includes('senzing') ? [newSenzingRecord] : [newTargetRecord]);
+      if (destination.includes('senzing')) await writeJsonl(destination, [newSenzingRecord]);
+      else if (destination.includes('targets')) await writeJsonl(destination, [newTargetRecord]);
+      else await fs.writeFile(destination, newSecuritiesCsv, 'utf8');
     });
     const harness = await createHarness({
       localMetadata: metadata('v1', { senzing: 'old-senzing', targets: 'old-targets' }),
@@ -405,7 +465,9 @@ describe('data refresh service', () => {
           releaseFirstDownload = release;
         });
       }
-      await writeJsonl(destination, destination.includes('senzing') ? [newSenzingRecord] : [newTargetRecord]);
+      if (destination.includes('senzing')) await writeJsonl(destination, [newSenzingRecord]);
+      else if (destination.includes('targets')) await writeJsonl(destination, [newTargetRecord]);
+      else await fs.writeFile(destination, newSecuritiesCsv, 'utf8');
     });
     const { refresher } = await createHarness({
       localMetadata: metadata('v1', { senzing: 'old-senzing', targets: 'old-targets' }),
@@ -465,18 +527,20 @@ describe('startup data file bootstrap', () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'startup-data-'));
     const senzingPath = path.join(dir, 'senzing.json');
     const targetsNestedPath = path.join(dir, 'targets.nested.json');
+    const securitiesPath = path.join(dir, 'securities.csv');
     const refreshMetadataPath = path.join(dir, 'refresh-metadata.json');
     await writeJsonl(senzingPath, [oldSenzingRecord]);
     const refreshNow = vi.fn(async () => {
       await writeJsonl(targetsNestedPath, [oldTargetRecord]);
+      await fs.writeFile(securitiesPath, oldSecuritiesCsv, 'utf8');
       return { status: 'updated' as const, version: 'v1', message: 'updated' };
     });
     const logger = { info: vi.fn(), warn: vi.fn() };
 
-    await expect(ensureDataFilesForStartup({ senzingPath, targetsNestedPath, refreshMetadataPath, refreshNow, logger })).resolves.toMatchObject({ status: 'updated' });
+    await expect(ensureDataFilesForStartup({ senzingPath, targetsNestedPath, securitiesPath, refreshMetadataPath, refreshNow, logger })).resolves.toMatchObject({ status: 'updated' });
 
     expect(refreshNow).toHaveBeenCalledTimes(1);
-    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('missing'), { missingFiles: [targetsNestedPath] });
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('missing'), { missingFiles: [targetsNestedPath, securitiesPath] });
   });
 
   test('does not run a startup update when required data files already exist', async () => {
@@ -484,12 +548,14 @@ describe('startup data file bootstrap', () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'startup-data-'));
     const senzingPath = path.join(dir, 'senzing.json');
     const targetsNestedPath = path.join(dir, 'targets.nested.json');
+    const securitiesPath = path.join(dir, 'securities.csv');
     const refreshMetadataPath = path.join(dir, 'refresh-metadata.json');
     await writeJsonl(senzingPath, [oldSenzingRecord]);
     await writeJsonl(targetsNestedPath, [oldTargetRecord]);
+    await fs.writeFile(securitiesPath, oldSecuritiesCsv, 'utf8');
     const refreshNow = vi.fn(async () => ({ status: 'updated' as const, version: 'v1', message: 'updated' }));
 
-    await expect(ensureDataFilesForStartup({ senzingPath, targetsNestedPath, refreshMetadataPath, refreshNow })).resolves.toBeUndefined();
+    await expect(ensureDataFilesForStartup({ senzingPath, targetsNestedPath, securitiesPath, refreshMetadataPath, refreshNow })).resolves.toBeUndefined();
 
     expect(refreshNow).not.toHaveBeenCalled();
   });
@@ -499,10 +565,11 @@ describe('startup data file bootstrap', () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'startup-data-'));
     const senzingPath = path.join(dir, 'senzing.json');
     const targetsNestedPath = path.join(dir, 'targets.nested.json');
+    const securitiesPath = path.join(dir, 'securities.csv');
     const refreshMetadataPath = path.join(dir, 'refresh-metadata.json');
     const refreshNow = vi.fn(async () => ({ status: 'failed' as const, message: 'Data refresh failed: offline', error: 'offline' }));
 
-    await expect(ensureDataFilesForStartup({ senzingPath, targetsNestedPath, refreshMetadataPath, refreshNow })).rejects.toThrow(/Startup data update failed: offline/u);
+    await expect(ensureDataFilesForStartup({ senzingPath, targetsNestedPath, securitiesPath, refreshMetadataPath, refreshNow })).rejects.toThrow(/Startup data update failed: offline/u);
   });
 
   test('downloads data when metadata is current but a required local data file is missing', async () => {
@@ -512,14 +579,15 @@ describe('startup data file bootstrap', () => {
       remoteMetadata: current,
       downloader: vi.fn(async (url, destination) => {
         if (url.includes('senzing')) await writeJsonl(destination, [oldSenzingRecord]);
-        else await writeJsonl(destination, [oldTargetRecord]);
+        else if (url.includes('targets')) await writeJsonl(destination, [oldTargetRecord]);
+        else await fs.writeFile(destination, oldSecuritiesCsv, 'utf8');
       }),
     });
     await fs.rm(harness.targetsNestedPath);
 
     await expect(harness.refresher.refreshNow()).resolves.toMatchObject({ status: 'updated', version: 'v1' });
 
-    expect(harness.downloader).toHaveBeenCalledTimes(2);
+    expect(harness.downloader).toHaveBeenCalledTimes(3);
     await expect(fs.access(harness.targetsNestedPath)).resolves.toBeUndefined();
   });
 });

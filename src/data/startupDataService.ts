@@ -7,13 +7,15 @@ import { ActiveDebarmentRepositories } from '../domain/debarmentService.js';
 export interface StartupDataFilesOptions {
   senzingPath: string;
   targetsNestedPath: string;
+  securitiesPath: string;
   refreshMetadataPath: string;
   refreshNow?: () => Promise<RefreshResult>;
   logger?: Pick<Console, 'info' | 'warn'>;
 }
 
 export async function ensureDataFilesForStartup(options: StartupDataFilesOptions): Promise<RefreshResult | undefined> {
-  const missingFiles = await missingLocalFiles([options.senzingPath, options.targetsNestedPath]);
+  const requiredFiles = [options.senzingPath, options.targetsNestedPath, options.securitiesPath];
+  const missingFiles = await missingLocalFiles(requiredFiles);
   if (missingFiles.length === 0) return undefined;
 
   const logger = options.logger ?? console;
@@ -27,7 +29,7 @@ export async function ensureDataFilesForStartup(options: StartupDataFilesOptions
     throw new Error(`Startup data update did not run: ${result.message}`);
   }
 
-  const stillMissingFiles = await missingLocalFiles([options.senzingPath, options.targetsNestedPath]);
+  const stillMissingFiles = await missingLocalFiles(requiredFiles);
   if (stillMissingFiles.length > 0) {
     throw new Error(`Startup data update completed but required data files are still missing: ${stillMissingFiles.join(', ')}`);
   }
@@ -44,6 +46,7 @@ function createStartupRefreshRunner(options: StartupDataFilesOptions): () => Pro
   const refreshService = new DataRefreshService({
     senzingPath: options.senzingPath,
     targetsNestedPath: options.targetsNestedPath,
+    securitiesPath: options.securitiesPath,
     refreshMetadataPath: options.refreshMetadataPath,
     activeRepositories,
     logger: options.logger ? { ...console, ...options.logger } : console,
