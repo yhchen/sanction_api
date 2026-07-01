@@ -28,6 +28,13 @@ async function tempSqlitePath(): Promise<string> {
   return path.join(dir, 'nested', 'sanction.sqlite');
 }
 
+async function builderTempFiles(sqlitePath: string): Promise<string[]> {
+  const directory = path.dirname(sqlitePath);
+  const basename = path.basename(sqlitePath);
+  const entries = await fs.readdir(directory);
+  return entries.filter((entry) => entry.startsWith(`${basename}.tmp-`) || entry.startsWith(`${basename}.backup.tmp-`));
+}
+
 function scalarCount(db: Database.Database, sql: string): number {
   return (db.prepare(sql).get() as CountRow | undefined)?.count ?? 0;
 }
@@ -35,6 +42,7 @@ function scalarCount(db: Database.Database, sql: string): number {
 describe('SQLite builder', () => {
   test('builds a searchable SQLite database from JSONL fixtures', async () => {
     const sqlitePath = await tempSqlitePath();
+    await createEmptySqliteDatabase(sqlitePath);
 
     await buildSqliteDatabase({
       senzingPath: senzingFixture,
@@ -102,5 +110,30 @@ describe('SQLite builder', () => {
     } finally {
       db.close();
     }
+  });
+
+  test('leaves the existing SQLite database unchanged when publish cannot replace an open destination', async () => {
+    const sqlitePath = await tempSqlitePath();
+    await buildSqliteDatabase({
+      senzingPath: senzingFixture,
+      targetsNestedPath: targetsNestedFixture,
+      sqlitePath,
+    });
+
+    const openDb = new Database(sqlitePath, { readonly: true, fileMustExist: true });
+    try {
+      await expect(buildSqliteDatabase({
+        senzingPath: senzingFixture,
+        targetsNestedPath: targetsNestedFixture,
+        sqlitePath,
+      })).rejects.toThrow();
+
+      expect(validateSqliteSchema(openDb)).toBe(true);
+      expect(scalarCount(openDb, 'SELECT COUNT(*) AS count FROM records')).toBe(5);
+    } finally {
+      openDb.close();
+    }
+
+    expect(await builderTempFiles(sqlitePath)).toEqual([]);
   });
 });

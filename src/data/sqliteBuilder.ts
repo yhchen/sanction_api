@@ -74,30 +74,7 @@ async function runBuildTransaction(db: Database.Database, options: BuildSqliteDa
 }
 
 async function publishSqliteFile(tempSqlitePath: string, sqlitePath: string): Promise<void> {
-  const backupPath = tempPathFor(`${sqlitePath}.backup`);
-  let backupCreated = false;
-
-  try {
-    await fs.rename(sqlitePath, backupPath);
-    backupCreated = true;
-  } catch (error) {
-    if (!isMissingFileError(error)) throw error;
-  }
-
-  try {
-    await fs.rename(tempSqlitePath, sqlitePath);
-  } catch (error) {
-    if (backupCreated) {
-      await fs.rename(backupPath, sqlitePath).catch(() => undefined);
-    }
-    throw error;
-  }
-
-  if (backupCreated) await fs.rm(backupPath, { force: true });
-}
-
-function isMissingFileError(error: unknown): boolean {
-  return typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT';
+  await fs.rename(tempSqlitePath, sqlitePath);
 }
 
 async function insertSenzingRecords(db: Database.Database, senzingPath: string): Promise<void> {
