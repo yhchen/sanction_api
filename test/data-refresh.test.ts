@@ -426,18 +426,23 @@ describe('data refresh service', () => {
 describe('admin /update handler and scheduler', () => {
   test('allows only admins to run /update and keeps update out of visible player menu', async () => {
     const refreshNow = vi.fn(async () => ({ status: 'current' as const, version: 'v1', message: 'Data already current.' }));
+    const rebuildNow = vi.fn(async () => ({ status: 'updated' as const, message: 'SQLite databases rebuilt.' }));
     const debarmentService = new DebarmentService(SenzingMemoryRepository.fromRecords([]), TargetsNestedMemoryRepository.fromRecords([]));
     const securitiesService = new SecuritiesService(new ActiveSecuritiesRepositories(SenzingMemoryRepository.fromRecords([])));
     const handler = new BotCommandHandler(
       new SanctionedLookupService(debarmentService, securitiesService),
       createAccessControl('*', { adminTelegramUsers: '456' }),
-      { refreshNow },
+      { refreshNow, rebuildNow },
     );
 
     await expect(handler.handleMessage('/update', 123)).resolves.toMatchObject({ text: 'Unauthorized.' });
     await expect(handler.handleMessage('/update', 456)).resolves.toMatchObject({ text: expect.stringContaining('already current') });
+    await expect(handler.handleMessage('/update_db', 123)).resolves.toMatchObject({ text: 'Unauthorized.' });
+    await expect(handler.handleMessage('/update_db', 456)).resolves.toMatchObject({ text: expect.stringContaining('SQLite databases rebuilt') });
     expect(refreshNow).toHaveBeenCalledTimes(1);
+    expect(rebuildNow).toHaveBeenCalledTimes(1);
     expect(VISIBLE_BOT_COMMANDS.map((command) => command.command)).not.toContain('update');
+    expect(VISIBLE_BOT_COMMANDS.map((command) => command.command)).not.toContain('update_db');
   });
 
   test('schedules daily refresh at the next configured local 05:00 and repeats after each run', async () => {

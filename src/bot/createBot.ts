@@ -34,7 +34,7 @@ export function createBot(token: string, handler: BotCommandHandler): Telegraf<C
     await replyToContext(ctx, await handler.handleStart(ctx.from?.id, payload));
   });
 
-  bot.command(['check', 'search', 'basic', 'full', 'request', 'approve', 'update', 'cancel'], async (ctx) => {
+  bot.command(['check', 'search', 'basic', 'full', 'request', 'approve', 'update', 'update_db', 'cancel'], async (ctx) => {
     await replyToContext(ctx, await handler.handleMessage(ctx.message.text, ctx.from?.id, metadataFromContext(ctx)));
   });
 

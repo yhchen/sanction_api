@@ -10,7 +10,7 @@
 - 命中后会返回 `/basic` 和 `/full` 内联按钮，便于继续查看详情。
 - 支持三种访问控制模式：公开、静态白名单、管理员批准。
 - 未授权用户可发送 `/request` 申请访问；管理员可用 `/approve` 批准。
-- 管理员可手动发送 `/update` 同时刷新 `debarment` 和 `securities` 两套数据；机器人也会每天 05:00 自动检查两者。
+- 管理员可手动发送 `/update` 同时刷新 `debarment` 和 `securities` 两套远端数据；也可以发送 `/update_db` 强制用现有本地 JSONL 文件重建两套 SQLite 查询库。机器人每天 05:00 自动检查远端数据更新。
 - 启动时优先打开或构建两套 SQLite 查询库；如果首次启动时某一套数据为空，会先用空库启动服务，再自动触发该数据源的更新。
 
 ## 数据文件
@@ -191,7 +191,7 @@ npm run dev
 - `/basic` - 显示基础记录信息
 - `/full` - 显示完整制裁详情
 
-`/request`、`/approve` 和管理员专用的 `/update` 仍然可以手动输入使用，但不会显示在命令菜单中。未授权用户通过 `/start` 的提示了解如何发送 `/request` 申请访问；管理员仍可手动使用 `/approve` 批准用户。
+`/request`、`/approve` 和管理员专用的 `/update`、`/update_db` 仍然可以手动输入使用，但不会显示在命令菜单中。未授权用户通过 `/start` 的提示了解如何发送 `/request` 申请访问；管理员仍可手动使用 `/approve` 批准用户。
 
 从菜单选择 `/check`、`/basic` 或 `/full` 时，Telegram 只会发送命令本身；机器人会提示用户继续发送完整主名称或完整别名。选择 `/search` 时，机器人会提示用户发送主名称或别名的部分输入用于候选搜索。发送 `/cancel` 可以取消当前等待输入模式。`/cancel` 不显示在命令菜单中。
 
@@ -310,7 +310,15 @@ https://data.opensanctions.org/datasets/latest/debarment/index.json
 
 机器人启动后还会按 `REFRESH_SCHEDULE_TIME` 每天自动对两套数据源分别执行同一条安全刷新路径，默认是服务器本地时区 05:00；两者各自独立调度，互不影响。每套数据源各自拒绝并发刷新（另一套仍可正常刷新），管理员会在合并回复中看到已有刷新正在运行的提示。
 
-`/update` 不会加入公开命令菜单；只有 `ADMIN_TELEGRAM_USERS` 中的管理员可以执行。
+如果代码里的 SQLite 索引规则变了，但本地 `senzing.json` / `targets.nested.json` 和 refresh metadata 没变，`/update` 会认为远端数据已经是最新，不会重建已有 SQLite。此时管理员可以手动发送：
+
+```text
+/update_db
+```
+
+`/update_db` 不下载远端数据，只读取当前本地的 `senzing.json`、`targets.nested.json`、`securities.senzing.json`、`securities.targets.nested.json`，强制重建 `sanction.sqlite` 和 `securities.sqlite`，并在当前 bot 进程内热切换到新库。`securities` 重建时不做 `debarment` 风险主题过滤，合并数据里的记录都会进入查询库。
+
+`/update` 和 `/update_db` 都不会加入公开命令菜单；只有 `ADMIN_TELEGRAM_USERS` 中的管理员可以执行。
 
 ### 8. 管理员收不到申请通知时的检查项
 
@@ -339,6 +347,7 @@ https://data.opensanctions.org/datasets/latest/debarment/index.json
 | 取消等待输入 | `/cancel` |
 | 管理员批准用户 | `/approve 123456789` |
 | 管理员刷新数据 | `/update` |
+| 管理员重建 SQLite 查询库 | `/update_db` |
 | 精确完整主名称状态查询 | `/check YATAI SMART INDUSTRIAL NEW CITY` |
 | 精确完整别名状态查询 | `/check YATAI NEW CITY` |
 

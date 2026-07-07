@@ -8,6 +8,7 @@ import { DataRefreshService, scheduleDailyRefresh } from './data/dataRefreshServ
 import { SecuritiesRefreshService } from './data/securitiesRefreshService.js';
 import { bootstrapSqliteRepositories } from './data/sqliteBootstrap.js';
 import type { BootstrapSqliteResult } from './data/sqliteBootstrap.js';
+import { SqliteRebuildService } from './data/sqliteRebuildService.js';
 import { ActiveDebarmentRepositories, DebarmentService } from './domain/debarmentService.js';
 import { ActiveSecuritiesRepositories, SecuritiesService } from './domain/securitiesService.js';
 import { SanctionedLookupService } from './domain/sanctionedLookupService.js';
@@ -82,11 +83,32 @@ async function main(): Promise<void> {
       minFuzzyScore: config.minFuzzyScore,
     });
     const combinedRefreshRunner = createCombinedRefreshRunner([dataRefreshService, securitiesRefreshService]);
+    const sqliteRebuildService = new SqliteRebuildService({
+      targets: [
+        {
+          label: 'debarment',
+          senzingPath: config.senzingPath,
+          targetsNestedPath: config.targetsNestedPath,
+          sqlitePath: config.sqlitePath,
+          activeRepositories,
+        },
+        {
+          label: 'securities',
+          senzingPath: config.securitiesSenzingPath,
+          targetsNestedPath: config.securitiesTargetsNestedPath,
+          sqlitePath: config.securitiesSqlitePath,
+          activeRepositories: activeSecuritiesRepositories,
+          minFuzzyScore: config.minFuzzyScore,
+          isIncludedRecord: () => true,
+        },
+      ],
+      minFuzzyScore: config.minFuzzyScore,
+    });
 
     const handler = new BotCommandHandler(sanctionedLookupService, accessControl, approvedUsersRepository, {
       maxMessageChars: config.maxMessageChars,
       telegramBotUsername: config.telegramBotUsername,
-    }, combinedRefreshRunner);
+    }, combinedRefreshRunner, sqliteRebuildService);
     const bot = createBot(config.telegramBotToken, handler);
 
     await startBot(bot);

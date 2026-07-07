@@ -24,29 +24,44 @@ export interface DataRefreshRunner {
   refreshNow(): Promise<RefreshResult>;
 }
 
+export interface DatabaseRebuildRunner {
+  rebuildNow(): Promise<RefreshResult>;
+}
+
+type MaintenanceRunner = Partial<DataRefreshRunner & DatabaseRebuildRunner>;
+
 export class BotCommandHandler {
   private readonly approvedUsers?: ApprovedUsersApprover;
   private readonly formatterOptions: FormatterOptions;
   private readonly dataRefreshRunner?: DataRefreshRunner;
+  private readonly databaseRebuildRunner?: DatabaseRebuildRunner;
   private readonly pendingQueries = new Map<string, QueryCommand>();
 
   constructor(
     private readonly service: SanctionedLookupService,
     private readonly accessControl: AccessControl,
-    approvedUsersOrFormatterOptionsOrDataRefreshRunner: ApprovedUsersApprover | FormatterOptions | DataRefreshRunner = {},
-    formatterOptionsOrDataRefreshRunner: FormatterOptions | DataRefreshRunner = {},
+    approvedUsersOrFormatterOptionsOrDataRefreshRunner: ApprovedUsersApprover | FormatterOptions | MaintenanceRunner = {},
+    formatterOptionsOrDataRefreshRunner: FormatterOptions | MaintenanceRunner = {},
     dataRefreshRunner?: DataRefreshRunner,
+    databaseRebuildRunner?: DatabaseRebuildRunner,
   ) {
     if (isApprovedUsersApprover(approvedUsersOrFormatterOptionsOrDataRefreshRunner)) {
       this.approvedUsers = approvedUsersOrFormatterOptionsOrDataRefreshRunner;
-      this.formatterOptions = isDataRefreshRunner(formatterOptionsOrDataRefreshRunner) ? {} : formatterOptionsOrDataRefreshRunner;
+      this.formatterOptions = isMaintenanceRunner(formatterOptionsOrDataRefreshRunner) ? {} : formatterOptionsOrDataRefreshRunner;
       this.dataRefreshRunner = dataRefreshRunner ?? (isDataRefreshRunner(formatterOptionsOrDataRefreshRunner) ? formatterOptionsOrDataRefreshRunner : undefined);
-    } else if (isDataRefreshRunner(approvedUsersOrFormatterOptionsOrDataRefreshRunner)) {
+      this.databaseRebuildRunner = databaseRebuildRunner ?? (isDatabaseRebuildRunner(formatterOptionsOrDataRefreshRunner) ? formatterOptionsOrDataRefreshRunner : undefined);
+    } else if (isMaintenanceRunner(approvedUsersOrFormatterOptionsOrDataRefreshRunner)) {
       this.formatterOptions = {};
-      this.dataRefreshRunner = approvedUsersOrFormatterOptionsOrDataRefreshRunner;
+      this.dataRefreshRunner = isDataRefreshRunner(approvedUsersOrFormatterOptionsOrDataRefreshRunner)
+        ? approvedUsersOrFormatterOptionsOrDataRefreshRunner
+        : dataRefreshRunner;
+      this.databaseRebuildRunner = isDatabaseRebuildRunner(approvedUsersOrFormatterOptionsOrDataRefreshRunner)
+        ? approvedUsersOrFormatterOptionsOrDataRefreshRunner
+        : databaseRebuildRunner;
     } else {
       this.formatterOptions = approvedUsersOrFormatterOptionsOrDataRefreshRunner;
       this.dataRefreshRunner = isDataRefreshRunner(formatterOptionsOrDataRefreshRunner) ? formatterOptionsOrDataRefreshRunner : dataRefreshRunner;
+      this.databaseRebuildRunner = databaseRebuildRunner ?? (isDatabaseRebuildRunner(formatterOptionsOrDataRefreshRunner) ? formatterOptionsOrDataRefreshRunner : undefined);
     }
   }
 
@@ -88,6 +103,10 @@ export class BotCommandHandler {
     if (parsed?.command === 'update') {
       this.clearPendingQuery(userId);
       return this.handleUpdate(userId);
+    }
+    if (parsed?.command === 'update_db') {
+      this.clearPendingQuery(userId);
+      return this.handleUpdateDb(userId);
     }
 
     if (!this.accessControl.isAllowed(userId)) {
@@ -173,6 +192,14 @@ export class BotCommandHandler {
     return textOnly(formatRefreshResult(result));
   }
 
+  private async handleUpdateDb(userId: string | number | undefined): Promise<BotReply> {
+    if (!this.accessControl.isAdmin(userId)) return textOnly('Unauthorized.');
+    if (!this.databaseRebuildRunner) return textOnly('Database rebuild is not configured.');
+
+    const result = await this.databaseRebuildRunner.rebuildNow();
+    return textOnly(formatRefreshResult(result));
+  }
+
   private waitForQueryArgument(command: QueryCommand, userId: string | number | undefined): BotReply {
     const key = pendingKey(userId);
     if (!key) return textOnly(`Usage: /${command} <name>`);
@@ -219,10 +246,10 @@ export class BotCommandHandler {
 }
 
 type QueryCommand = 'check' | 'search' | 'basic' | 'full';
-type SupportedCommand = QueryCommand | 'request' | 'approve' | 'update' | 'cancel';
+type SupportedCommand = QueryCommand | 'request' | 'approve' | 'update' | 'update_db' | 'cancel';
 
 function parseCommand(message: string): { command: SupportedCommand; argument: string } | undefined {
-  const match = message.match(/^\/(check|search|basic|full|request|approve|update|cancel)(?:@\w+)?(?:\s+([\s\S]*))?$/i);
+  const match = message.match(/^\/(check|search|basic|full|request|approve|update|update_db|cancel)(?:@\w+)?(?:\s+([\s\S]*))?$/i);
   if (!match) return undefined;
   return {
     command: match[1].toLocaleLowerCase('en-US') as SupportedCommand,
@@ -258,12 +285,20 @@ function extractRequesterId(replyToText: string | undefined): string {
   return match?.[1] ?? '';
 }
 
-function isApprovedUsersApprover(value: ApprovedUsersApprover | FormatterOptions | DataRefreshRunner): value is ApprovedUsersApprover {
+function isApprovedUsersApprover(value: ApprovedUsersApprover | FormatterOptions | MaintenanceRunner): value is ApprovedUsersApprover {
   return typeof (value as ApprovedUsersApprover).approve === 'function';
 }
 
-function isDataRefreshRunner(value: ApprovedUsersApprover | FormatterOptions | DataRefreshRunner): value is DataRefreshRunner {
+function isDataRefreshRunner(value: ApprovedUsersApprover | FormatterOptions | MaintenanceRunner): value is DataRefreshRunner {
   return typeof (value as DataRefreshRunner).refreshNow === 'function';
+}
+
+function isDatabaseRebuildRunner(value: ApprovedUsersApprover | FormatterOptions | MaintenanceRunner): value is DatabaseRebuildRunner {
+  return typeof (value as DatabaseRebuildRunner).rebuildNow === 'function';
+}
+
+function isMaintenanceRunner(value: FormatterOptions | MaintenanceRunner): value is MaintenanceRunner {
+  return isDataRefreshRunner(value) || isDatabaseRebuildRunner(value);
 }
 
 function formatRefreshResult(result: RefreshResult): string {
