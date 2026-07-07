@@ -1,6 +1,7 @@
 export interface SenzingName {
   NAME_TYPE?: string | null;
   NAME_FULL?: string | null;
+  NAME_ORG?: string | null;
 }
 
 export interface SenzingRisk {

@@ -28,6 +28,11 @@ async function tempSqlitePath(): Promise<string> {
   return path.join(dir, 'nested', 'sanction.sqlite');
 }
 
+async function writeJsonlFixture(filePath: string, records: unknown[]): Promise<void> {
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  await fs.writeFile(filePath, `${records.map((record) => JSON.stringify(record)).join('\n')}\n`, 'utf8');
+}
+
 async function builderTempFiles(sqlitePath: string): Promise<string[]> {
   const directory = path.dirname(sqlitePath);
   const basename = path.basename(sqlitePath);
@@ -67,6 +72,45 @@ describe('SQLite builder', () => {
         normalized_name: 'yatai new city',
       });
       expect(scalarCount(db, "SELECT COUNT(*) AS count FROM name_fts WHERE name_fts MATCH 'yatai'")).toBe(3);
+    } finally {
+      db.close();
+    }
+  });
+
+  test('indexes Senzing NAME_ORG primary and alias names', async () => {
+    const sqlitePath = await tempSqlitePath();
+    const fixtureDir = path.dirname(sqlitePath);
+    const senzingPath = path.join(fixtureDir, 'org-names.senzing.json');
+    const targetsNestedPath = path.join(fixtureDir, 'org-names.targets.nested.json');
+
+    await writeJsonlFixture(senzingPath, [{
+      DATA_SOURCE: 'OS_US_DHS_UFLPA',
+      RECORD_ID: 'NK-Vq8tbLjL9hai2V7Jx8PYe4',
+      RECORD_TYPE: 'ORGANIZATION',
+      NAMES: [
+        { NAME_TYPE: 'PRIMARY', NAME_ORG: 'Dongguan Oasis Shoes Co. Ltd.' },
+        { NAME_TYPE: 'ALIAS', NAME_ORG: 'Dongguan Lvzhou Shoes Co. Ltd.' },
+      ],
+      RISKS: [{ TOPIC: 'sanction' }],
+    }]);
+    await writeJsonlFixture(targetsNestedPath, [{
+      id: 'NK-Vq8tbLjL9hai2V7Jx8PYe4',
+      properties: { sanctions: [] },
+    }]);
+
+    await buildSqliteDatabase({ senzingPath, targetsNestedPath, sqlitePath, isIncludedRecord: () => true });
+
+    const db = new Database(sqlitePath, { readonly: true });
+    try {
+      expect(scalarCount(db, 'SELECT COUNT(*) AS count FROM names')).toBe(2);
+      expect(
+        db.prepare('SELECT record_id, name_full, normalized_name FROM names WHERE normalized_name = ?').get('dongguan lvzhou shoes co ltd') as NameRow | undefined,
+      ).toMatchObject({
+        record_id: 'NK-Vq8tbLjL9hai2V7Jx8PYe4',
+        name_full: 'Dongguan Lvzhou Shoes Co. Ltd.',
+        normalized_name: 'dongguan lvzhou shoes co ltd',
+      });
+      expect(scalarCount(db, "SELECT COUNT(*) AS count FROM name_fts WHERE name_fts MATCH 'lvzhou'")).toBe(1);
     } finally {
       db.close();
     }

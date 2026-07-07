@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import Database from 'better-sqlite3';
 import { normalizedTokens } from '../domain/nameScoring.js';
 import { normalizeName } from '../domain/normalize.js';
+import { extractedSenzingNames } from '../domain/senzingNames.js';
 import type { SanctionDetail, SenzingRecord, TargetNestedRecord, TargetNestedSanction } from '../domain/types.js';
 import { readJsonlFile } from './jsonl.js';
 import { initializeSqliteSchema, validateSqliteSchema } from './sqliteSchema.js';
@@ -99,17 +100,14 @@ async function insertSenzingRecords(
     insertRecord.run(record.RECORD_ID, JSON.stringify(record), isIncludedRecord(record) ? 1 : 0);
     const seenNormalizedNamesForRecord = new Set<string>();
 
-    for (const name of record.NAMES ?? []) {
-      const fullName = name.NAME_FULL?.trim();
-      if (!fullName) continue;
-
-      const normalized = normalizeName(fullName);
+    for (const name of extractedSenzingNames(record)) {
+      const normalized = normalizeName(name.value);
       if (!normalized || seenNormalizedNamesForRecord.has(normalized)) continue;
       seenNormalizedNamesForRecord.add(normalized);
 
       const tokensJson = JSON.stringify(normalizedTokens(normalized));
-      const result = insertName.run(record.RECORD_ID, fullName, normalized, name.NAME_TYPE ?? null, tokensJson) as InsertNameResult;
-      insertNameFts.run(normalized, fullName, record.RECORD_ID, Number(result.lastInsertRowid));
+      const result = insertName.run(record.RECORD_ID, name.value, normalized, name.type ?? null, tokensJson) as InsertNameResult;
+      insertNameFts.run(normalized, name.value, record.RECORD_ID, Number(result.lastInsertRowid));
     }
   });
 }
