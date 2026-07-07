@@ -158,7 +158,7 @@ describe('SQLite builder', () => {
     expect(await builderTempFiles(sqlitePath)).toEqual([]);
   });
 
-  test('leaves the existing SQLite database unchanged when publish cannot replace an open destination', async () => {
+  test('publishes a replacement while existing SQLite readers keep their snapshot', async () => {
     const sqlitePath = await tempSqlitePath();
     await buildSqliteDatabase({
       senzingPath: senzingFixture,
@@ -168,16 +168,24 @@ describe('SQLite builder', () => {
 
     const openDb = new Database(sqlitePath, { readonly: true, fileMustExist: true });
     try {
-      await expect(buildSqliteDatabase({
+      await buildSqliteDatabase({
         senzingPath: senzingFixture,
         targetsNestedPath: targetsNestedFixture,
         sqlitePath,
-      })).rejects.toThrow();
+      });
 
       expect(validateSqliteSchema(openDb)).toBe(true);
       expect(scalarCount(openDb, 'SELECT COUNT(*) AS count FROM records')).toBe(5);
     } finally {
       openDb.close();
+    }
+
+    const replacedDb = new Database(sqlitePath, { readonly: true, fileMustExist: true });
+    try {
+      expect(validateSqliteSchema(replacedDb)).toBe(true);
+      expect(scalarCount(replacedDb, 'SELECT COUNT(*) AS count FROM records')).toBe(5);
+    } finally {
+      replacedDb.close();
     }
 
     expect(await builderTempFiles(sqlitePath)).toEqual([]);
