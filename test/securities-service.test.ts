@@ -96,6 +96,19 @@ describe('SecuritiesService', () => {
     });
   });
 
+  test('returns high-threshold fuzzy candidates when one organization descriptor token replaces suffix tokens', async () => {
+    await expect(service([orgNameRecord], { minFuzzyScore: 0.8 }).searchCandidates('Dongguan Lvzhou Shoes Industry')).resolves.toMatchObject({
+      found: true,
+      candidates: [{
+        basic: {
+          recordId: 'NK-Vq8tbLjL9hai2V7Jx8PYe4',
+          primaryName: 'Dongguan Oasis Shoes Co. Ltd.',
+        },
+        matchedName: 'Dongguan Lvzhou Shoes Co. Ltd.',
+      }],
+    });
+  });
+
   test('fullByRecordId displays NAME_ORG primary names', async () => {
     await expect(service([orgNameRecord]).fullByRecordId('NK-Vq8tbLjL9hai2V7Jx8PYe4')).resolves.toMatchObject({
       found: true,

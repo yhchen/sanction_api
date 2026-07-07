@@ -11,6 +11,17 @@ export interface NameScore {
 export const DEFAULT_MIN_FUZZY_SCORE = 0.55;
 
 const LATIN_ALPHA_TOKEN = /^[a-z]+$/u;
+const ORGANIZATION_DESCRIPTOR_TOKENS = new Set([
+  'company',
+  'co',
+  'corp',
+  'corporation',
+  'industrial',
+  'industries',
+  'industry',
+  'limited',
+  'ltd',
+]);
 
 export function normalizedTokens(normalizedName: string): string[] {
   return normalizedName.split(' ').filter(Boolean);
@@ -95,7 +106,10 @@ function nearCompleteOrderedMatchBonus(
   candidateTokens: string[],
   exactTokenMatches: number,
 ): number {
-  if (queryTokens.length < 6 || exactTokenMatches < queryTokens.length - 1) return 0;
+  if (queryTokens.length < 4 || exactTokenMatches < queryTokens.length - 1) return 0;
+
+  const unmatchedQueryTokens = queryTokens.filter((queryToken) => !candidateTokens.includes(queryToken));
+  if (unmatchedQueryTokens.length !== 1 || !ORGANIZATION_DESCRIPTOR_TOKENS.has(unmatchedQueryTokens[0]!)) return 0;
 
   let candidateIndex = 0;
   let orderedExactMatches = 0;
@@ -106,7 +120,8 @@ function nearCompleteOrderedMatchBonus(
     candidateIndex = nextIndex + 1;
   }
 
-  return orderedExactMatches >= queryTokens.length - 1 ? 0.04 : 0;
+  if (orderedExactMatches < queryTokens.length - 1) return 0;
+  return queryTokens.length < 6 ? 0.09 : 0.04;
 }
 
 function damerauLevenshteinDistance(left: string, right: string, maxDistance: number): number {
