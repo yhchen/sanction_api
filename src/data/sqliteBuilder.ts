@@ -12,6 +12,7 @@ export interface BuildSqliteDatabaseOptions {
   senzingPath: string;
   targetsNestedPath: string;
   sqlitePath: string;
+  isIncludedRecord?: (record: SenzingRecord) => boolean;
 }
 
 interface InsertNameResult {
@@ -38,7 +39,7 @@ export async function buildSqliteDatabase(options: BuildSqliteDatabaseOptions): 
     const db = new Database(tempSqlitePath);
     try {
       initializeSqliteSchema(db);
-      await runBuildTransaction(db, options);
+      await runBuildTransaction(db, options, options.isIncludedRecord ?? isDebarment);
 
       if (!validateSqliteSchema(db)) throw new Error('SQLite schema validation failed.');
     } finally {
@@ -60,10 +61,14 @@ function tempPathFor(sqlitePath: string): string {
   return `${sqlitePath}.tmp-${process.pid}-${Date.now()}-${randomUUID()}`;
 }
 
-async function runBuildTransaction(db: Database.Database, options: BuildSqliteDatabaseOptions): Promise<void> {
+async function runBuildTransaction(
+  db: Database.Database,
+  options: BuildSqliteDatabaseOptions,
+  isIncludedRecord: (record: SenzingRecord) => boolean,
+): Promise<void> {
   db.exec('BEGIN IMMEDIATE;');
   try {
-    await insertSenzingRecords(db, options.senzingPath);
+    await insertSenzingRecords(db, options.senzingPath, isIncludedRecord);
     await insertTargetSanctions(db, options.targetsNestedPath);
     db.exec('ANALYZE;');
     db.exec('COMMIT;');
@@ -77,8 +82,12 @@ async function publishSqliteFile(tempSqlitePath: string, sqlitePath: string): Pr
   await fs.rename(tempSqlitePath, sqlitePath);
 }
 
-async function insertSenzingRecords(db: Database.Database, senzingPath: string): Promise<void> {
-  const insertRecord = db.prepare('INSERT INTO records (record_id, record_json, is_debarment) VALUES (?, ?, ?)');
+async function insertSenzingRecords(
+  db: Database.Database,
+  senzingPath: string,
+  isIncludedRecord: (record: SenzingRecord) => boolean,
+): Promise<void> {
+  const insertRecord = db.prepare('INSERT INTO records (record_id, record_json, is_included) VALUES (?, ?, ?)');
   const insertName = db.prepare(
     'INSERT INTO names (record_id, name_full, normalized_name, name_type, normalized_tokens_json) VALUES (?, ?, ?, ?, ?)',
   );
@@ -87,7 +96,7 @@ async function insertSenzingRecords(db: Database.Database, senzingPath: string):
   await readJsonlFile<SenzingRecord>(senzingPath, (record, lineNumber) => {
     if (!record.RECORD_ID) throw new Error(`Senzing record missing RECORD_ID at line ${lineNumber}`);
 
-    insertRecord.run(record.RECORD_ID, JSON.stringify(record), isDebarment(record) ? 1 : 0);
+    insertRecord.run(record.RECORD_ID, JSON.stringify(record), isIncludedRecord(record) ? 1 : 0);
     const seenNormalizedNamesForRecord = new Set<string>();
 
     for (const name of record.NAMES ?? []) {
@@ -105,7 +114,7 @@ async function insertSenzingRecords(db: Database.Database, senzingPath: string):
   });
 }
 
-function isDebarment(record: SenzingRecord): boolean {
+export function isDebarment(record: SenzingRecord): boolean {
   return (record.RISKS ?? []).some((risk) => risk.TOPIC?.trim().toLocaleLowerCase('en-US') === 'debarment');
 }
 

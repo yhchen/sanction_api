@@ -123,7 +123,13 @@ export interface BasicInfo {
   url?: string;
 }
 
-export interface DebarmentMatch {
+/**
+ * Generic shape for a single-list name-match result. Shared by both the debarment and
+ * sanctioned-securities domain services (the shape was never actually debarment-specific — only
+ * the name was); the orchestration layer (`sanctionedLookupService.ts`) tags these with which
+ * list they came from when merging results from both services.
+ */
+export interface EntityMatch {
   record: SenzingRecord;
   matchedName: string;
   matchedNameType?: string | null;
@@ -131,16 +137,16 @@ export interface DebarmentMatch {
   sanctions: SanctionDetail[];
 }
 
-export interface DebarmentQueryResult {
+export interface EntityQueryResult {
   query: string;
   found: boolean;
-  matches: DebarmentMatch[];
+  matches: EntityMatch[];
   totalMatches: number;
   truncated: boolean;
   dataStatus?: RepositoryDataStatus;
 }
 
-export interface DebarmentCandidate {
+export interface EntityCandidate {
   record: SenzingRecord;
   matchedName: string;
   matchedNameType?: string | null;
@@ -149,10 +155,10 @@ export interface DebarmentCandidate {
   basic: BasicInfo;
 }
 
-export interface DebarmentCandidateSearchResult {
+export interface EntityCandidateSearchResult {
   query: string;
   found: boolean;
-  candidates: DebarmentCandidate[];
+  candidates: EntityCandidate[];
   totalCandidates: number;
   truncated: boolean;
   dataStatus?: RepositoryDataStatus;

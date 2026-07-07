@@ -7,18 +7,18 @@ import type {
   TargetDetailsRepository,
 } from './types.js';
 
-export interface DebarmentServiceOptions {
+export interface SecuritiesServiceOptions {
   maxResults?: number;
   maxCandidateResults?: number;
 }
 
-export interface ActiveDebarmentRepositorySnapshot {
+export interface ActiveSecuritiesRepositorySnapshot {
   senzingRepository: SenzingLookupRepository;
   targetDetailsRepository?: TargetDetailsRepository;
 }
 
-export class ActiveDebarmentRepositories {
-  private snapshotValue: ActiveDebarmentRepositorySnapshot;
+export class ActiveSecuritiesRepositories {
+  private snapshotValue: ActiveSecuritiesRepositorySnapshot;
 
   constructor(
     senzingRepository: SenzingLookupRepository,
@@ -27,7 +27,7 @@ export class ActiveDebarmentRepositories {
     this.snapshotValue = { senzingRepository, targetDetailsRepository };
   }
 
-  snapshot(): ActiveDebarmentRepositorySnapshot {
+  snapshot(): ActiveSecuritiesRepositorySnapshot {
     return this.snapshotValue;
   }
 
@@ -39,36 +39,21 @@ export class ActiveDebarmentRepositories {
   }
 }
 
-export class DebarmentService {
+/**
+ * Looks up names against the merged OpenSanctions "Sanctioned Securities" dataset. Unlike
+ * `DebarmentService`, no topic filter is applied here: the dedicated repository backing this
+ * service only ever contains records merged in from the securities collection's eligible source
+ * datasets, so every record it returns already qualifies as sanctioned.
+ */
+export class SecuritiesService {
   private readonly maxResults: number;
   private readonly maxCandidateResults: number;
-  private readonly activeRepositories: ActiveDebarmentRepositories;
+  private readonly activeRepositories: ActiveSecuritiesRepositories;
 
-  constructor(
-    senzingRepositoryOrActiveRepositories: SenzingLookupRepository | ActiveDebarmentRepositories,
-    targetDetailsRepositoryOrOptions?: TargetDetailsRepository | DebarmentServiceOptions,
-    options: DebarmentServiceOptions = {},
-  ) {
-    if (senzingRepositoryOrActiveRepositories instanceof ActiveDebarmentRepositories) {
-      this.activeRepositories = senzingRepositoryOrActiveRepositories;
-      const resolvedOptions = targetDetailsRepositoryOrOptions as DebarmentServiceOptions | undefined;
-      this.maxResults = Math.max(1, resolvedOptions?.maxResults ?? 5);
-      this.maxCandidateResults = Math.max(1, resolvedOptions?.maxCandidateResults ?? 10);
-      return;
-    }
-
-    const targetDetailsRepository = isDebarmentServiceOptions(targetDetailsRepositoryOrOptions)
-      ? undefined
-      : targetDetailsRepositoryOrOptions;
-    const resolvedOptions = isDebarmentServiceOptions(targetDetailsRepositoryOrOptions)
-      ? targetDetailsRepositoryOrOptions
-      : options;
-    this.activeRepositories = new ActiveDebarmentRepositories(
-      senzingRepositoryOrActiveRepositories,
-      targetDetailsRepository,
-    );
-    this.maxResults = Math.max(1, resolvedOptions.maxResults ?? 5);
-    this.maxCandidateResults = Math.max(1, resolvedOptions.maxCandidateResults ?? 10);
+  constructor(activeRepositories: ActiveSecuritiesRepositories, options: SecuritiesServiceOptions = {}) {
+    this.activeRepositories = activeRepositories;
+    this.maxResults = Math.max(1, options.maxResults ?? 5);
+    this.maxCandidateResults = Math.max(1, options.maxCandidateResults ?? 10);
   }
 
   async check(name: string): Promise<EntityQueryResult> {
@@ -98,18 +83,14 @@ export class DebarmentService {
   private queryByName(name: string, includeTargetDetails: boolean): EntityQueryResult {
     const repositories = this.activeRepositories.snapshot();
     const dataStatus = repositoryDataStatus(repositories.senzingRepository);
-    const allMatches = repositories.senzingRepository.findByName(name).filter((match) => isDebarmentRecord(match.record));
+    const allMatches = repositories.senzingRepository.findByName(name);
     return materializeMatches(name, allMatches, includeTargetDetails, repositories.targetDetailsRepository, dataStatus, this.maxResults);
   }
 
   private searchCandidateNames(name: string): EntityCandidateSearchResult {
     const repositories = this.activeRepositories.snapshot();
     const dataStatus = repositoryDataStatus(repositories.senzingRepository);
-    const allCandidates = uniqueCandidatesByRecord(
-      repositories.senzingRepository
-        .findCandidateNames(name)
-        .filter((candidate) => isDebarmentRecord(candidate.record)),
-    );
+    const allCandidates = uniqueCandidatesByRecord(repositories.senzingRepository.findCandidateNames(name));
     const cappedCandidates = allCandidates.slice(0, this.maxCandidateResults);
     return {
       query: name,
@@ -125,9 +106,7 @@ export class DebarmentService {
     const repositories = this.activeRepositories.snapshot();
     const dataStatus = repositoryDataStatus(repositories.senzingRepository);
     const record = repositories.senzingRepository.findByRecordId(recordId);
-    if (!record || !isDebarmentRecord(record)) {
-      return emptyResult(recordId, dataStatus);
-    }
+    if (!record) return emptyResult(recordId, dataStatus);
 
     const primaryName = getPrimaryName(record) ?? record.RECORD_ID;
     return materializeMatches(
@@ -141,19 +120,9 @@ export class DebarmentService {
   }
 }
 
-function isDebarmentRecord(record: SenzingRecord): boolean {
-  return (record.RISKS ?? []).some((risk) => risk.TOPIC?.trim().toLocaleLowerCase('en-US') === 'debarment');
-}
-
 function getPrimaryName(record: SenzingRecord): string | undefined {
   return (
     (record.NAMES ?? []).find((name) => name.NAME_TYPE?.toLocaleUpperCase('en-US') === 'PRIMARY')?.NAME_FULL?.trim() ??
     (record.NAMES ?? [])[0]?.NAME_FULL?.trim()
   );
-}
-
-function isDebarmentServiceOptions(
-  value: TargetDetailsRepository | DebarmentServiceOptions | undefined,
-): value is DebarmentServiceOptions {
-  return value !== undefined && typeof (value as TargetDetailsRepository).findSanctionsByRecordId !== 'function';
 }

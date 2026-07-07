@@ -7,6 +7,8 @@ import { ApprovedUsersRepository } from '../src/data/approvedUsersRepository.js'
 import { SenzingMemoryRepository } from '../src/data/senzingMemoryRepository.js';
 import { TargetsNestedMemoryRepository } from '../src/data/targetsNestedMemoryRepository.js';
 import { DebarmentService, type DebarmentServiceOptions } from '../src/domain/debarmentService.js';
+import { ActiveSecuritiesRepositories, SecuritiesService } from '../src/domain/securitiesService.js';
+import { SanctionedLookupService } from '../src/domain/sanctionedLookupService.js';
 import { formatBasicResults, formatCheckResult, formatFullResults, formatFuzzySearchResult } from '../src/bot/formatters.js';
 import { createAccessControl } from '../src/bot/accessControl.js';
 import { BotCommandHandler } from '../src/bot/handlers.js';
@@ -15,22 +17,28 @@ import { loadConfig } from '../src/config.js';
 const fixturesDir = path.join(process.cwd(), 'test/fixtures');
 const senzingFixture = path.join(fixturesDir, 'senzing.fixture.jsonl');
 const targetsFixture = path.join(fixturesDir, 'targets.nested.fixture.jsonl');
-const emptyDataExactMessage = 'Local debarment data is not loaded yet. Data refresh may still be running; try again after the update completes.';
-const emptyDataSearchMessage = 'Local debarment data is not loaded yet, so candidate search is unavailable. Try again after the update completes.';
+const emptyDataExactMessage = 'Local sanctions data is not loaded yet. Data refresh may still be running; try again after the update completes.';
+const emptyDataSearchMessage = 'Local sanctions data is not loaded yet, so candidate search is unavailable. Try again after the update completes.';
+
+/** Every test in this file only exercises debarment fixtures, so the securities side is always an empty, always-current repository — it never contributes matches, only the `source` tag on results changes. */
+function wrapDebarment(debarmentService: DebarmentService): SanctionedLookupService {
+  const emptySecuritiesService = new SecuritiesService(new ActiveSecuritiesRepositories(SenzingMemoryRepository.fromRecords([])));
+  return new SanctionedLookupService(debarmentService, emptySecuritiesService);
+}
 
 async function buildService(options: DebarmentServiceOptions & { minFuzzyScore?: number } = {}) {
   const { minFuzzyScore = 0.55, ...serviceOptions } = options;
   const senzing = await SenzingMemoryRepository.fromFile(senzingFixture, { minFuzzyScore });
   const targets = await TargetsNestedMemoryRepository.fromFile(targetsFixture);
-  return new DebarmentService(senzing, targets, serviceOptions);
+  return wrapDebarment(new DebarmentService(senzing, targets, serviceOptions));
 }
 
 function buildEmptyService(options: DebarmentServiceOptions = {}) {
-  return new DebarmentService(
+  return wrapDebarment(new DebarmentService(
     SenzingMemoryRepository.fromRecords([]),
     TargetsNestedMemoryRepository.fromRecords([]),
     options,
-  );
+  ));
 }
 
 class InMemoryApprovedUsers {
@@ -77,12 +85,12 @@ interface BotReplyWithNotifications {
 }
 
 function createApprovalHandler(
-  service: DebarmentService,
+  service: SanctionedLookupService,
   accessControl: ReturnType<typeof createAccessControl>,
   approvedUsers: InMemoryApprovedUsers,
 ): ApprovalHandler {
   const Handler = BotCommandHandler as unknown as new (
-    service: DebarmentService,
+    service: SanctionedLookupService,
     accessControl: ReturnType<typeof createAccessControl>,
     approvedUsers: InMemoryApprovedUsers,
   ) => ApprovalHandler;
@@ -198,7 +206,7 @@ describe('normalized exact matching', () => {
       stats: () => ({ records: 12 }),
     };
 
-    const cappedService = new DebarmentService(repository);
+    const cappedService = wrapDebarment(new DebarmentService(repository));
 
     await expect(cappedService.check('anything')).resolves.toMatchObject({
       matches: expect.arrayContaining([
@@ -312,7 +320,7 @@ describe('repositories and debarment service', () => {
 });
 
 describe('formatters', () => {
-  let service: DebarmentService;
+  let service: SanctionedLookupService;
 
   beforeEach(async () => {
     service = await buildService({ maxResults: 2 });

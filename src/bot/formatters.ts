@@ -1,4 +1,10 @@
-import type { BotReply, DebarmentCandidateSearchResult, DebarmentMatch, DebarmentQueryResult, ReplyButton, SanctionDetail } from '../domain/types.js';
+import type { BotReply, ReplyButton, SanctionDetail } from '../domain/types.js';
+import type {
+  SanctionedCandidateSearchResult,
+  SanctionedMatch,
+  SanctionedQueryResult,
+  SanctionSource,
+} from '../domain/sanctionedLookupService.js';
 
 export interface FormatterOptions {
   maxMessageChars?: number;
@@ -7,24 +13,39 @@ export interface FormatterOptions {
 
 const DEFAULT_MAX_MESSAGE_CHARS = 3800;
 const NO_DATA_FOUND = 'No Data Found!';
-const EMPTY_DATA_EXACT = 'Local debarment data is not loaded yet. Data refresh may still be running; try again after the update completes.';
-const EMPTY_DATA_SEARCH = 'Local debarment data is not loaded yet, so candidate search is unavailable. Try again after the update completes.';
+const EMPTY_DATA_EXACT = 'Local sanctions data is not loaded yet. Data refresh may still be running; try again after the update completes.';
+const EMPTY_DATA_SEARCH = 'Local sanctions data is not loaded yet, so candidate search is unavailable. Try again after the update completes.';
 
-export function formatCheckResult(result: DebarmentQueryResult, options: FormatterOptions = {}): BotReply {
+const SOURCE_LABELS: Record<SanctionSource, string> = {
+  debarment: 'Debarred',
+  securities: 'Sanctioned (Securities)',
+};
+
+function sourceLabel(source: SanctionSource): string {
+  return SOURCE_LABELS[source];
+}
+
+function headerLabel(sources: SanctionSource[]): string {
+  const unique = new Set(sources);
+  return unique.size === 1 ? sourceLabel([...unique][0]) : 'Sanctioned';
+}
+
+export function formatCheckResult(result: SanctionedQueryResult, options: FormatterOptions = {}): BotReply {
   if (!result.found) return reply(result.dataStatus === 'empty' ? EMPTY_DATA_EXACT : NO_DATA_FOUND);
 
-  const lines = ['Debarred'];
+  const lines = [headerLabel(result.matches.map((match) => match.source))];
   appendCapNotice(lines, result);
   if (result.matches.length > 1) {
     lines.push('', 'Matches:');
     result.matches.forEach((match, index) => {
-      lines.push(`${index + 1}. ${match.basic.primaryName} (${match.basic.recordId})`);
+      lines.push(`${index + 1}. ${match.basic.primaryName} (${match.basic.recordId}) — ${sourceLabel(match.source)}`);
       if (match.basic.matchedName !== match.basic.primaryName) lines.push(`   Matched Name: ${match.basic.matchedName}`);
     });
   } else if (result.matches[0]) {
     const match = result.matches[0];
     lines.push('', `Name: ${match.basic.primaryName}`);
     if (match.basic.matchedName !== match.basic.primaryName) lines.push(`Matched Name: ${match.basic.matchedName}`);
+    lines.push(`Source: ${sourceLabel(match.source)}`);
   }
 
   return {
@@ -33,7 +54,7 @@ export function formatCheckResult(result: DebarmentQueryResult, options: Formatt
   };
 }
 
-export function formatBasicResults(result: DebarmentQueryResult, options: FormatterOptions = {}): BotReply {
+export function formatBasicResults(result: SanctionedQueryResult, options: FormatterOptions = {}): BotReply {
   if (!result.found) return reply(result.dataStatus === 'empty' ? EMPTY_DATA_EXACT : NO_DATA_FOUND);
   const lines: string[] = [];
   appendCapNotice(lines, result);
@@ -44,7 +65,7 @@ export function formatBasicResults(result: DebarmentQueryResult, options: Format
   return reply(truncateText(lines.join('\n'), options.maxMessageChars));
 }
 
-export function formatFullResults(result: DebarmentQueryResult, options: FormatterOptions = {}): BotReply {
+export function formatFullResults(result: SanctionedQueryResult, options: FormatterOptions = {}): BotReply {
   if (!result.found) return reply(result.dataStatus === 'empty' ? EMPTY_DATA_EXACT : NO_DATA_FOUND);
   const lines: string[] = [];
   appendCapNotice(lines, result);
@@ -65,21 +86,21 @@ export function formatFullResults(result: DebarmentQueryResult, options: Formatt
   return reply(truncateText(lines.join('\n'), options.maxMessageChars));
 }
 
-export function formatFuzzySearchResult(result: DebarmentCandidateSearchResult, options: FormatterOptions = {}): BotReply {
+export function formatFuzzySearchResult(result: SanctionedCandidateSearchResult, options: FormatterOptions = {}): BotReply {
   if (!result.found) return reply(result.dataStatus === 'empty' ? EMPTY_DATA_SEARCH : 'No close name candidates found. Try a more complete name.');
 
   const lines = ['Possible matches'];
   if (result.truncated) lines.push(`Showing ${result.candidates.length} of ${result.totalCandidates} candidates. Refine your search if needed.`);
   const hasFullLinks = Boolean(options.telegramBotUsername?.trim());
   const fullLinkInstruction = hasFullLinks
-    ? 'These are fuzzy name candidates, not a Debarred verdict. Tap Full to view sanctions details for a candidate.'
-    : 'These are fuzzy name candidates, not a Debarred verdict. Use /full with the complete name for exact lookup.';
+    ? 'These are fuzzy name candidates, not a sanctioned verdict. Tap Full to view sanctions details for a candidate.'
+    : 'These are fuzzy name candidates, not a sanctioned verdict. Use /full with the complete name for exact lookup.';
   lines.push('', fullLinkInstruction);
 
   result.candidates.forEach((candidate, index) => {
     const fullLink = fullDeepLink(candidate.basic.recordId, options.telegramBotUsername);
     const primaryName = hasFullLinks ? escapeHtml(candidate.basic.primaryName) : candidate.basic.primaryName;
-    lines.push('', `${index + 1}. ${primaryName}${fullLink ? `  ${fullLink}` : ''}`);
+    lines.push('', `${index + 1}. ${primaryName}${fullLink ? `  ${fullLink}` : ''} — ${sourceLabel(candidate.source)}`);
     if (candidate.basic.matchedName !== candidate.basic.primaryName) {
       const matchedName = hasFullLinks ? escapeHtml(candidate.basic.matchedName) : candidate.basic.matchedName;
       lines.push(`   Matched Name: ${matchedName}`);
@@ -105,9 +126,10 @@ export function truncateText(text: string, maxMessageChars = DEFAULT_MAX_MESSAGE
   return `${text.slice(0, bodyLimit).trimEnd()}…${notice}`;
 }
 
-function basicSection(match: DebarmentMatch, index?: number): string[] {
+function basicSection(match: SanctionedMatch, index?: number): string[] {
   const lines = [index ? `Basic Information #${index}` : 'Basic Information'];
   lines.push(`Record ID: ${match.basic.recordId}`);
+  lines.push(`Source: ${sourceLabel(match.source)}`);
   lines.push(`Name: ${match.basic.primaryName}`);
   lines.push(`Matched Name: ${match.basic.matchedName}`);
   appendList(lines, 'Aliases', match.basic.aliases);
@@ -140,7 +162,7 @@ function appendSanctionField(lines: string[], label: string, sanction: SanctionD
   if (Array.isArray(values) && values.length > 0) lines.push(`  ${label}: ${values.join(', ')}`);
 }
 
-function appendCapNotice(lines: string[], result: DebarmentQueryResult): void {
+function appendCapNotice(lines: string[], result: SanctionedQueryResult): void {
   if (result.truncated) lines.push(`Showing ${result.matches.length} of ${result.totalMatches} matches. Refine your query if needed.`, '');
 }
 
@@ -154,7 +176,7 @@ function appendList(lines: string[], label: string, values: string[]): void {
   for (const value of values) lines.push(`- ${value}`);
 }
 
-function actionButtons(matches: DebarmentMatch[]): ReplyButton[][] {
+function actionButtons(matches: SanctionedMatch[]): ReplyButton[][] {
   return matches.map((match, index) => {
     const suffix = matches.length > 1 ? ` ${index + 1}` : '';
     return [

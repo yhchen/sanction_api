@@ -1,4 +1,4 @@
-import type { DebarmentService } from '../domain/debarmentService.js';
+import type { SanctionedLookupService } from '../domain/sanctionedLookupService.js';
 import type { BotReply } from '../domain/types.js';
 import type { AccessControl } from './accessControl.js';
 import { formatBasicResults, formatCheckResult, formatFullResults, formatFuzzySearchResult, type FormatterOptions } from './formatters.js';
@@ -31,7 +31,7 @@ export class BotCommandHandler {
   private readonly pendingQueries = new Map<string, QueryCommand>();
 
   constructor(
-    private readonly service: DebarmentService,
+    private readonly service: SanctionedLookupService,
     private readonly accessControl: AccessControl,
     approvedUsersOrFormatterOptionsOrDataRefreshRunner: ApprovedUsersApprover | FormatterOptions | DataRefreshRunner = {},
     formatterOptionsOrDataRefreshRunner: FormatterOptions | DataRefreshRunner = {},
@@ -267,8 +267,8 @@ function isDataRefreshRunner(value: ApprovedUsersApprover | FormatterOptions | D
 }
 
 function formatRefreshResult(result: RefreshResult): string {
-  if (result.status === 'current') return result.message || 'OpenSanctions debarment data is already current.';
-  if (result.status === 'updated') return result.message || 'OpenSanctions debarment data was updated.';
+  if (result.status === 'current') return result.message || 'OpenSanctions data is already current.';
+  if (result.status === 'updated') return result.message || 'OpenSanctions data was updated.';
   if (result.status === 'in_progress') return result.message || 'Data refresh is already running.';
   return result.message || 'Data refresh failed.';
 }

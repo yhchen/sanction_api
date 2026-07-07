@@ -1,17 +1,17 @@
 # Sanction API Telegram Bot
 
-这是一个基于 Node.js / TypeScript 的 Telegram 机器人，用本地 OpenSanctions 衍生数据文件做 Debarred 名单查询。机器人支持私有部署、管理员批准访问、基础信息查询和完整制裁详情查询。
+这是一个基于 Node.js / TypeScript 的 Telegram 机器人，用本地 OpenSanctions 衍生数据文件做制裁名单查询。查询同时覆盖两套独立数据源：OpenSanctions `debarment` 名单（`Debarred`）和 OpenSanctions [`securities`](https://www.opensanctions.org/datasets/securities/) 集合（`Sanctioned (Securities)`，即受制裁证券/公司，含 LEI、ISIN 关联实体）。机器人支持私有部署、管理员批准访问、基础信息查询和完整制裁详情查询。
 
 ## 功能概览
 
-- 通过 Telegram 查询完整主名称或完整别名是否命中 Debarred 记录。
-- 支持纯文本模糊候选搜索；直接发送主名称或别名的部分输入会返回可能匹配的完整名称候选。
+- 通过 Telegram 查询完整主名称或完整别名是否命中 `Debarred` 或 `Sanctioned (Securities)` 记录；同一次查询会合并两套数据源的结果，每条命中都会标注来源列表。
+- 支持纯文本模糊候选搜索；直接发送主名称或别名的部分输入会返回可能匹配的完整名称候选（同样合并两套数据源）。
 - 支持 `/check`、`/search`、`/basic`、`/full` 查询命令；菜单选择无参数命令时会等待用户下一条输入。
 - 命中后会返回 `/basic` 和 `/full` 内联按钮，便于继续查看详情。
 - 支持三种访问控制模式：公开、静态白名单、管理员批准。
 - 未授权用户可发送 `/request` 申请访问；管理员可用 `/approve` 批准。
-- 管理员可手动发送 `/update` 检查 OpenSanctions debarment 数据更新；机器人也会每天 05:00 自动检查。
-- 启动时优先打开或构建 SQLite 查询库；如果首次启动时数据为空，会先用空库启动服务，再自动触发一次数据更新。
+- 管理员可手动发送 `/update` 同时刷新 `debarment` 和 `securities` 两套数据；机器人也会每天 05:00 自动检查两者。
+- 启动时优先打开或构建两套 SQLite 查询库；如果首次启动时某一套数据为空，会先用空库启动服务，再自动触发该数据源的更新。
 
 ## 数据文件
 
@@ -19,22 +19,26 @@
 
 | 文件 | 用途 |
 | --- | --- |
-| `senzing.json` | SQLite 构建输入，提供名称、别名、风险主题和基础信息。 |
-| `targets.nested.json` | SQLite 构建输入，提供 OpenSanctions record id 对应的 `/full` 制裁详情。 |
-| `sanction.sqlite` | 运行时查询库，默认由 `senzing.json` 和 `targets.nested.json` 构建。 |
+| `senzing.json` | `debarment` 数据源 SQLite 构建输入，提供名称、别名、风险主题和基础信息。 |
+| `targets.nested.json` | `debarment` 数据源 SQLite 构建输入，提供 OpenSanctions record id 对应的 `/full` 制裁详情。 |
+| `sanction.sqlite` | `debarment` 数据源运行时查询库，默认由 `senzing.json` 和 `targets.nested.json` 构建。 |
+| `refresh-metadata.json` | `debarment` 数据源最近一次成功刷新后的 dataset version 和目标资源 checksum，用于避免无变化时下载大文件。 |
+| `securities.senzing.json` | `securities` 数据源 SQLite 构建输入，由 OpenSanctions `securities` collection 下所有暴露 `senzing.json`/`targets.nested.json` 的子数据源合并而成。 |
+| `securities.targets.nested.json` | `securities` 数据源 SQLite 构建输入，同样是多个子数据源合并后的结果。 |
+| `securities.sqlite` | `securities` 数据源运行时查询库。 |
+| `securities-refresh-metadata.json` | `securities` 数据源每个子数据源的 version/checksum 快照，用于判断是否需要重新拉取合并。 |
 | `entities.ftm.json` | V1 阶段只做过评估，不作为当前查询数据源。 |
-| `refresh-metadata.json` | 最近一次成功刷新后的 dataset version 和目标资源 checksum，用于避免无变化时下载大文件。 |
 
-注意：虽然文件名是 `.json`，当前读取逻辑按 JSONL 处理，也就是每一行都是一个独立 JSON 对象。
+注意：虽然文件名是 `.json`，当前读取逻辑按 JSONL 处理，也就是每一行都是一个独立 JSON 对象。`securities.*` 两个文件是由 OpenSanctions `securities` collection 下约 20 个子数据源（`us_ofac_sdn`、`eu_sanctions_map`、`eu_fsf` 等，逐个含 `senzing.json`/`targets.nested.json` 的子源）逐个下载后合并生成，子数据源列表在每次刷新时从 OpenSanctions 目录动态发现，不在代码里写死；仅提供 CSV/参考数据而不提供这两个文件的子源（如 `openfigi`、`ext_gleif`、`research`）会被自动跳过。
 
 ## 匹配规则
 
-- 查询使用规范化后的完整主名称或完整别名精确匹配，来源是 `NAMES[].NAME_FULL`。
-- `/check`、`/basic`、`/full` 使用完整主名称或完整别名精确匹配。例如：`/check YATAI SMART INDUSTRIAL NEW CITY` 和 `/check YATAI NEW CITY` 都可以命中同一条记录，但 `/check Yatai Smart` 不会按部分名称判断为 `Debarred`。
-- `/search <name>` 和无等待模式下的纯文本会执行模糊候选搜索，会在主名称和别名中查找可能匹配的名称候选，不直接判定 `Debarred`。例如：`Yatai Smart` 或 `Myanmar Yatai` 可返回 `YATAI SMART INDUSTRIAL NEW CITY` 候选。
+- 查询使用规范化后的完整主名称或完整别名精确匹配，来源是 `NAMES[].NAME_FULL`，并同时对 `debarment` 和 `securities` 两套仓库执行查询。
+- `/check`、`/basic`、`/full` 使用完整主名称或完整别名精确匹配。例如：`/check YATAI SMART INDUSTRIAL NEW CITY` 和 `/check YATAI NEW CITY` 都可以命中同一条记录，但 `/check Yatai Smart` 不会按部分名称判断为命中。
+- `/search <name>` 和无等待模式下的纯文本会执行模糊候选搜索，会在主名称和别名中查找可能匹配的名称候选，不直接判定命中。例如：`Yatai Smart` 或 `Myanmar Yatai` 可返回 `YATAI SMART INDUSTRIAL NEW CITY` 候选。
 - 配置 `TELEGRAM_BOT_USERNAME` 后，`/search` 和纯文本模糊搜索结果会在每个候选旁显示 `Full` 链接；点击后通过 Telegram deep link 返回该记录的完整制裁详情。
-- 只有包含风险主题 `debarment` 的记录会返回为 `Debarred`。
-- `/search <name>` 返回按相关性排序且数量受控的候选名称。
+- `debarment` 数据源只有包含风险主题 `debarment` 的记录才会命中；`securities` 数据源不做额外主题过滤，只要记录来自 OpenSanctions `securities` collection 的合并结果就视为命中。每条命中结果都会标注具体来源（`Debarred` 或 `Sanctioned (Securities)`），以及该记录自身的 `Topics/Risks`。
+- `/search <name>` 返回按相关性排序且数量受控的候选名称，候选同样会标注来源。
 - `/basic <name>` 返回基础记录信息。
 - `/full <name>` 返回制裁详情。
 - `/check`、`/basic`、`/full` 后面不带名称时，机器人会进入对应精确查询等待输入模式；下一条普通文本会作为完整主名称或完整别名执行并清除等待状态。`/search` 后面不带名称时，下一条普通文本会作为模糊候选搜索输入。
@@ -70,6 +74,10 @@ export SENZING_PATH="./senzing.json"
 export TARGETS_NESTED_PATH="./targets.nested.json"
 export SQLITE_PATH="./sanction.sqlite"
 export REFRESH_METADATA_PATH="./refresh-metadata.json"
+export SECURITIES_SENZING_PATH="./securities.senzing.json"
+export SECURITIES_TARGETS_NESTED_PATH="./securities.targets.nested.json"
+export SECURITIES_SQLITE_PATH="./securities.sqlite"
+export SECURITIES_REFRESH_METADATA_PATH="./securities-refresh-metadata.json"
 export REFRESH_SCHEDULE_TIME="05:00"
 export MIN_FUZZY_SCORE="0.8"
 export MAX_RESULTS="5"
@@ -132,9 +140,13 @@ npm run dev
 | `APPROVED_TELEGRAM_USERS_PATH` | `./approved-users.json` | 管理员批准后的用户 ID 存储文件。运行进程必须有写入权限。 |
 | `SENZING_PATH` | `./senzing.json` | `senzing.json` 数据文件路径。 |
 | `TARGETS_NESTED_PATH` | `./targets.nested.json` | `targets.nested.json` 数据文件路径。 |
-| `SQLITE_PATH` | `./sanction.sqlite` | SQLite 查询库路径；启动和刷新时会从 JSONL 数据构建或替换该文件。 |
-| `REFRESH_METADATA_PATH` | `./refresh-metadata.json` | 最近一次成功数据刷新的 metadata/checksum 存储路径。运行进程必须有写入权限。 |
-| `REFRESH_SCHEDULE_TIME` | `05:00` | 每日自动刷新检查时间，使用运行服务器本地时区，格式为 `HH:MM`。 |
+| `SQLITE_PATH` | `./sanction.sqlite` | `debarment` 数据源 SQLite 查询库路径；启动和刷新时会从 JSONL 数据构建或替换该文件。 |
+| `REFRESH_METADATA_PATH` | `./refresh-metadata.json` | `debarment` 数据源最近一次成功数据刷新的 metadata/checksum 存储路径。运行进程必须有写入权限。 |
+| `SECURITIES_SENZING_PATH` | `./securities.senzing.json` | `securities` 数据源合并后的 `senzing.json` 文件路径。 |
+| `SECURITIES_TARGETS_NESTED_PATH` | `./securities.targets.nested.json` | `securities` 数据源合并后的 `targets.nested.json` 文件路径。 |
+| `SECURITIES_SQLITE_PATH` | `./securities.sqlite` | `securities` 数据源 SQLite 查询库路径。 |
+| `SECURITIES_REFRESH_METADATA_PATH` | `./securities-refresh-metadata.json` | `securities` 数据源每个子数据源最近一次成功刷新的 version/checksum 存储路径。运行进程必须有写入权限。 |
+| `REFRESH_SCHEDULE_TIME` | `05:00` | 两套数据源每日自动刷新检查时间，使用运行服务器本地时区，格式为 `HH:MM`。 |
 | `MIN_FUZZY_SCORE` | `0.8` | 模糊候选搜索的最低分数阈值；低于该分数的候选不会显示。取值范围为 `0` 到 `1`。 |
 | `MAX_RESULTS` | `5` | 单次查询最多返回的匹配数量。 |
 | `MAX_MESSAGE_CHARS` | `3800` | 单条 Telegram 消息的最大输出字符数；不能超过 Telegram 限制。 |
@@ -174,7 +186,7 @@ npm run dev
 机器人启动时会自动向 Telegram 注册命令菜单，不需要再到 `@BotFather` 手工配置。菜单中只显示面向查询和入口的快速指令：
 
 - `/start` - 显示帮助和访问状态
-- `/check` - 查询完整主名称或完整别名的 Debarred 状态
+- `/check` - 查询完整主名称或完整别名的制裁状态（`Debarred` / `Sanctioned (Securities)`）
 - `/search` - 按主名称或别名的部分输入搜索候选
 - `/basic` - 显示基础记录信息
 - `/full` - 显示完整制裁详情
@@ -221,6 +233,10 @@ export SENZING_PATH="./senzing.json"
 export TARGETS_NESTED_PATH="./targets.nested.json"
 export SQLITE_PATH="./sanction.sqlite"
 export REFRESH_METADATA_PATH="./refresh-metadata.json"
+export SECURITIES_SENZING_PATH="./securities.senzing.json"
+export SECURITIES_TARGETS_NESTED_PATH="./securities.targets.nested.json"
+export SECURITIES_SQLITE_PATH="./securities.sqlite"
+export SECURITIES_REFRESH_METADATA_PATH="./securities-refresh-metadata.json"
 export REFRESH_SCHEDULE_TIME="05:00"
 export MIN_FUZZY_SCORE="0.8"
 export MAX_RESULTS="5"
@@ -269,13 +285,13 @@ node dist/index.js
 /update
 ```
 
-机器人会先读取 OpenSanctions debarment metadata：
+这会并行触发 `debarment` 和 `securities` 两套独立的数据刷新流程，两者互不阻塞（其中一个失败不影响另一个），并把两者的结果合并成一条回复。
+
+**`debarment` 数据源**：读取 OpenSanctions debarment metadata：
 
 ```text
 https://data.opensanctions.org/datasets/latest/debarment/index.json
 ```
-
-刷新流程：
 
 1. 比较远端 `senzing.json` 和 `targets.nested.json` 的 checksum 与 `REFRESH_METADATA_PATH` 中的本地 metadata。
 2. 如果 checksum 相同，不下载完整文件，直接回复数据已经是最新。
@@ -284,7 +300,15 @@ https://data.opensanctions.org/datasets/latest/debarment/index.json
 5. 只有 JSONL 文件和 SQLite 查询库都构建成功后，才替换本地文件、写入刷新 metadata，并热切换查询服务。
 6. 任何 metadata、下载、验证或索引构建失败都会保留旧数据，玩家查询继续使用旧索引。
 
-机器人启动后还会按 `REFRESH_SCHEDULE_TIME` 每天自动执行同一条安全刷新路径，默认是服务器本地时区 05:00。并发刷新会被拒绝，管理员会收到已有刷新正在运行的回复。
+**`securities` 数据源**：读取 OpenSanctions 目录 `https://api.opensanctions.org/catalog`，找到 `securities` collection 下的所有子数据源，筛选出同时暴露 `senzing.json` 和 `targets.nested.json` 的子源（其余只提供 CSV/参考数据的子源会被跳过）。
+
+1. 比较每个子数据源的 version/checksum 与 `SECURITIES_REFRESH_METADATA_PATH` 中的本地快照；只要子数据源集合或任一 checksum 发生变化就触发重建。
+2. 逐个下载每个子数据源的 `senzing.json` 和 `targets.nested.json` 到临时文件并校验 checksum。
+3. 把所有子数据源的 `senzing.json` 合并成一份，所有 `targets.nested.json` 合并成另一份（JSONL 直接拼接，逐行仍是独立 JSON 对象）。
+4. 用合并后的文件在临时目录构建 SQLite 查询库（不做 `debarment` 那样的风险主题过滤，合并进来的记录都视为命中）。
+5. 构建成功后才替换本地文件、写入刷新 metadata，并热切换查询服务；任何环节失败都保留旧数据。
+
+机器人启动后还会按 `REFRESH_SCHEDULE_TIME` 每天自动对两套数据源分别执行同一条安全刷新路径，默认是服务器本地时区 05:00；两者各自独立调度，互不影响。每套数据源各自拒绝并发刷新（另一套仍可正常刷新），管理员会在合并回复中看到已有刷新正在运行的提示。
 
 `/update` 不会加入公开命令菜单；只有 `ADMIN_TELEGRAM_USERS` 中的管理员可以执行。
 

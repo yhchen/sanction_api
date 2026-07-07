@@ -6,7 +6,7 @@ import type { BotReply } from '../domain/types.js';
 
 export const VISIBLE_BOT_COMMANDS: BotCommand[] = [
   { command: 'start', description: '显示帮助和访问状态' },
-  { command: 'check', description: '查询完整名称的 Debarred 状态' },
+  { command: 'check', description: '查询完整名称的制裁状态（Debarred / Sanctioned）' },
   { command: 'search', description: '按部分名称搜索候选' },
   { command: 'basic', description: '显示基础记录信息' },
   { command: 'full', description: '显示完整制裁详情' },

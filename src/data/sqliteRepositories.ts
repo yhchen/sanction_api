@@ -71,7 +71,7 @@ export class SqliteSenzingRepository implements SenzingLookupRepository {
         n.normalized_tokens_json
       FROM names n
       INNER JOIN records r ON r.record_id = n.record_id
-      WHERE r.is_debarment = 1
+      WHERE r.is_included = 1
         AND n.normalized_name = ?
       ORDER BY r.record_id, n.name_full
     `).all(normalized) as NameMatchRow[];
@@ -104,7 +104,7 @@ export class SqliteSenzingRepository implements SenzingLookupRepository {
       INNER JOIN names n ON n.id = f.name_id
       INNER JOIN records r ON r.record_id = n.record_id
       WHERE name_fts MATCH ?
-        AND r.is_debarment = 1
+        AND r.is_included = 1
       ORDER BY r.record_id, n.name_full
     `).all(ftsQuery) as NameMatchRow[];
 
@@ -134,7 +134,7 @@ export class SqliteSenzingRepository implements SenzingLookupRepository {
       SELECT record_id, record_json
       FROM records
       WHERE record_id = ?
-        AND is_debarment = 1
+        AND is_included = 1
     `).get(recordId) as RecordRow | undefined;
 
     return row ? parseJson<SenzingRecord>(row.record_json) : undefined;

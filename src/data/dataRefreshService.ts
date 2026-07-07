@@ -1,11 +1,16 @@
-import { createHash } from 'node:crypto';
-import { createReadStream, createWriteStream } from 'node:fs';
 import fs from 'node:fs/promises';
-import { Readable } from 'node:stream';
-import { pipeline } from 'node:stream/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { SenzingMemoryRepository } from './senzingMemoryRepository.js';
+import {
+  DEFAULT_DOWNLOAD_TIMEOUT_MS,
+  DEFAULT_METADATA_TIMEOUT_MS,
+  downloadWithFetch,
+  isNodeError,
+  localFilesPopulated,
+  replaceFilesAndMetadata,
+  validateDownloadedResource,
+} from './refreshShared.js';
 import { buildSqliteDatabase } from './sqliteBuilder.js';
 import { SqliteSenzingRepository, SqliteTargetDetailsRepository } from './sqliteRepositories.js';
 import { TargetsNestedMemoryRepository } from './targetsNestedMemoryRepository.js';
@@ -32,8 +37,7 @@ export interface DatasetMetadata {
 export type RefreshMetadataFetcher = () => Promise<DatasetMetadata>;
 export type RefreshDownloader = (url: string, destinationPath: string) => Promise<void>;
 
-export const DEFAULT_METADATA_TIMEOUT_MS = 60_000;
-export const DEFAULT_DOWNLOAD_TIMEOUT_MS = 30 * 60 * 1000;
+export { DEFAULT_DOWNLOAD_TIMEOUT_MS, DEFAULT_METADATA_TIMEOUT_MS } from './refreshShared.js';
 
 export type RefreshStatus = 'current' | 'updated' | 'failed' | 'in_progress';
 
@@ -84,11 +88,11 @@ export class DataRefreshService {
     try {
       const remoteMetadata = await this.fetchMetadata();
       const localMetadata = await readPersistedMetadata(this.options.refreshMetadataPath);
-      if (metadataChecksumsMatch(localMetadata, remoteMetadata) && await localRefreshOutputsExist({
-        senzingPath: this.options.senzingPath,
-        targetsNestedPath: this.options.targetsNestedPath,
-        sqlitePath: this.options.sqlitePath,
-      })) {
+      if (metadataChecksumsMatch(localMetadata, remoteMetadata) && await localFilesPopulated([
+        this.options.senzingPath,
+        this.options.targetsNestedPath,
+        this.options.sqlitePath,
+      ])) {
         return { status: 'current', version: remoteMetadata.version, message: `OpenSanctions debarment data is already current (${remoteMetadata.version}).` };
       }
 
@@ -262,78 +266,22 @@ interface ReplaceLocalFilesOptions {
 }
 
 
-async function localRefreshOutputsExist(options: { senzingPath: string; targetsNestedPath: string; sqlitePath?: string }): Promise<boolean> {
-  for (const filePath of [options.senzingPath, options.targetsNestedPath, options.sqlitePath].filter(isDefinedString)) {
-    try {
-      const stats = await fs.stat(filePath);
-      if (stats.size === 0) return false;
-    } catch (error: unknown) {
-      if (isNodeError(error) && error.code === 'ENOENT') return false;
-      throw error;
-    }
-  }
-  return true;
-}
-
 async function replaceLocalFilesAndMetadata(options: ReplaceLocalFilesOptions): Promise<void> {
-  await fs.mkdir(path.dirname(options.senzingPath), { recursive: true });
-  await fs.mkdir(path.dirname(options.targetsNestedPath), { recursive: true });
-  if (options.sqlitePath) await fs.mkdir(path.dirname(options.sqlitePath), { recursive: true });
-  await fs.mkdir(path.dirname(options.refreshMetadataPath), { recursive: true });
-
-  const backupSuffix = `.refresh-backup-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-  const senzingBackupPath = `${options.senzingPath}${backupSuffix}`;
-  const targetsBackupPath = `${options.targetsNestedPath}${backupSuffix}`;
-  const sqliteBackupPath = options.sqlitePath ? `${options.sqlitePath}${backupSuffix}` : undefined;
-  const metadataBackupPath = `${options.refreshMetadataPath}${backupSuffix}`;
   const metadataTempPath = `${options.refreshMetadataPath}.tmp-${process.pid}-${Date.now()}`;
-  let movedSenzing = false;
-  let movedTargets = false;
-  let copiedSqlite = false;
-  let movedMetadata = false;
-  let publishedSenzing = false;
-  let publishedTargets = false;
-  let publishedSqlite = false;
-  let publishedMetadata = false;
-
-  try {
-    movedSenzing = await moveIfExists(options.senzingPath, senzingBackupPath);
-    movedTargets = await moveIfExists(options.targetsNestedPath, targetsBackupPath);
-    copiedSqlite = options.sqlitePath && sqliteBackupPath ? await copyIfExists(options.sqlitePath, sqliteBackupPath) : false;
-    movedMetadata = await moveIfExists(options.refreshMetadataPath, metadataBackupPath);
-    await fs.copyFile(options.stagedSenzingPath, options.senzingPath);
-    publishedSenzing = true;
-    await fs.copyFile(options.stagedTargetsPath, options.targetsNestedPath);
-    publishedTargets = true;
-    if (options.stagedSqlitePath && options.sqlitePath) {
-      await fs.copyFile(options.stagedSqlitePath, options.sqlitePath);
-      publishedSqlite = true;
-    }
-    await writePersistedMetadata(metadataTempPath, options.metadata);
-    await fs.rename(metadataTempPath, options.refreshMetadataPath);
-    publishedMetadata = true;
-    await options.afterPublish?.();
-  } catch (error) {
-    await removeIfExists(metadataTempPath);
-    if (movedSenzing || publishedSenzing) await removeIfExists(options.senzingPath);
-    if (movedTargets || publishedTargets) await removeIfExists(options.targetsNestedPath);
-    if (options.sqlitePath && copiedSqlite && sqliteBackupPath) {
-      await fs.copyFile(sqliteBackupPath, options.sqlitePath);
-    } else if (options.sqlitePath && publishedSqlite) {
-      await removeIfExists(options.sqlitePath);
-    }
-    if (movedMetadata || publishedMetadata) await removeIfExists(options.refreshMetadataPath);
-    if (movedSenzing) await fs.rename(senzingBackupPath, options.senzingPath);
-    if (movedTargets) await fs.rename(targetsBackupPath, options.targetsNestedPath);
-    if (movedMetadata) await fs.rename(metadataBackupPath, options.refreshMetadataPath);
-    throw error;
-  }
-
-  await removeBackupFiles([senzingBackupPath, targetsBackupPath, metadataBackupPath, sqliteBackupPath].filter(isDefinedString), options.logger);
-}
-
-function isDefinedString(value: string | undefined): value is string {
-  return typeof value === 'string';
+  await replaceFilesAndMetadata({
+    files: [
+      { stagedPath: options.stagedSenzingPath, finalPath: options.senzingPath },
+      { stagedPath: options.stagedTargetsPath, finalPath: options.targetsNestedPath },
+    ],
+    sqlite: options.stagedSqlitePath && options.sqlitePath
+      ? { stagedPath: options.stagedSqlitePath, finalPath: options.sqlitePath }
+      : undefined,
+    metadataPath: options.refreshMetadataPath,
+    metadataTempPath,
+    metadataContents: `${JSON.stringify(options.metadata, null, 2)}\n`,
+    logger: options.logger,
+    afterPublish: options.afterPublish,
+  });
 }
 
 function validateSqliteRepositories(sqlitePath: string): void {
@@ -347,43 +295,6 @@ function validateSqliteRepositories(sqlitePath: string): void {
   }
 }
 
-async function moveIfExists(sourcePath: string, destinationPath: string): Promise<boolean> {
-  try {
-    await fs.rename(sourcePath, destinationPath);
-    return true;
-  } catch (error: unknown) {
-    if (isNodeError(error) && error.code === 'ENOENT') return false;
-    throw error;
-  }
-}
-
-async function copyIfExists(sourcePath: string, destinationPath: string): Promise<boolean> {
-  try {
-    await fs.copyFile(sourcePath, destinationPath);
-    return true;
-  } catch (error: unknown) {
-    if (isNodeError(error) && error.code === 'ENOENT') return false;
-    throw error;
-  }
-}
-
-async function removeIfExists(filePath: string): Promise<void> {
-  await fs.rm(filePath, { force: true });
-}
-
-async function removeBackupFiles(filePaths: string[], logger: Pick<Console, 'warn'> = console): Promise<void> {
-  const failures: string[] = [];
-  for (const filePath of filePaths) {
-    try {
-      await removeIfExists(filePath);
-    } catch (error: unknown) {
-      const reason = error instanceof Error ? error.message : String(error);
-      failures.push(`${filePath}: ${reason}`);
-    }
-  }
-  if (failures.length > 0) logger.warn('OpenSanctions refresh backup cleanup failed:', failures);
-}
-
 async function readPersistedMetadata(filePath: string): Promise<DatasetMetadata | undefined> {
   try {
     return parsePersistedMetadata(JSON.parse(await fs.readFile(filePath, 'utf8')));
@@ -391,10 +302,6 @@ async function readPersistedMetadata(filePath: string): Promise<DatasetMetadata 
     if (isNodeError(error) && error.code === 'ENOENT') return undefined;
     throw error;
   }
-}
-
-async function writePersistedMetadata(filePath: string, metadata: DatasetMetadata): Promise<void> {
-  await fs.writeFile(filePath, `${JSON.stringify(metadata, null, 2)}\n`, 'utf8');
 }
 
 function parsePersistedMetadata(raw: unknown): DatasetMetadata {
@@ -418,51 +325,6 @@ function metadataChecksumsMatch(local: DatasetMetadata | undefined, remote: Data
   return TARGET_RESOURCE_NAMES.every((name) => local.resources[name]?.checksum === remote.resources[name].checksum);
 }
 
-async function validateDownloadedResource(filePath: string, metadata: DatasetResourceMetadata): Promise<void> {
-  const stats = await fs.stat(filePath);
-  if (stats.size === 0) throw new Error(`${metadata.name} download is empty.`);
-  if (metadata.size !== undefined && metadata.size > 0 && stats.size !== metadata.size) {
-    throw new Error(`${metadata.name} size mismatch.`);
-  }
-  await verifyChecksum(filePath, metadata);
-}
-
-async function verifyChecksum(filePath: string, metadata: DatasetResourceMetadata): Promise<void> {
-  const parsed = parseChecksum(metadata.checksum);
-  if (!parsed) throw new Error(`${metadata.name} checksum format is not supported.`);
-  const actual = await hashFile(filePath, parsed.algorithm);
-  if (actual !== parsed.hex) throw new Error(`${metadata.name} checksum mismatch.`);
-}
-
-function parseChecksum(checksum: string): { algorithm: 'sha256' | 'sha1' | 'md5'; hex: string } | undefined {
-  const normalized = checksum.trim().toLocaleLowerCase('en-US');
-  const prefixed = normalized.match(/^(sha256|sha1|md5)[:=]([a-f0-9]+)$/u);
-  if (prefixed) return { algorithm: prefixed[1] as 'sha256' | 'sha1' | 'md5', hex: prefixed[2] };
-  if (/^[a-f0-9]{64}$/u.test(normalized)) return { algorithm: 'sha256', hex: normalized };
-  if (/^[a-f0-9]{40}$/u.test(normalized)) return { algorithm: 'sha1', hex: normalized };
-  if (/^[a-f0-9]{32}$/u.test(normalized)) return { algorithm: 'md5', hex: normalized };
-  return undefined;
-}
-
-async function hashFile(filePath: string, algorithm: 'sha256' | 'sha1' | 'md5'): Promise<string> {
-  const hash = createHash(algorithm);
-  await new Promise<void>((resolve, reject) => {
-    const stream = createReadStream(filePath);
-    stream.on('data', (chunk) => hash.update(chunk));
-    stream.on('error', reject);
-    stream.on('end', resolve);
-  });
-  return hash.digest('hex');
-}
-
-async function downloadWithFetch(url: string, destinationPath: string): Promise<void> {
-  const response = await fetch(url, { signal: AbortSignal.timeout(DEFAULT_DOWNLOAD_TIMEOUT_MS) });
-  if (!response.ok) throw new Error(`Download failed for ${url} with HTTP ${response.status}`);
-  if (!response.body) throw new Error(`Download failed for ${url}: empty response body.`);
-
-  await pipeline(Readable.fromWeb(response.body), createWriteStream(destinationPath));
-}
-
 function resourceName(resource: unknown): string {
   if (!resource || typeof resource !== 'object') return '';
   const object = resource as Record<string, unknown>;
@@ -480,8 +342,4 @@ function stringValue(value: unknown): string {
 
 function numberValue(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
-}
-
-function isNodeError(error: unknown): error is NodeJS.ErrnoException {
-  return error instanceof Error && 'code' in error;
 }

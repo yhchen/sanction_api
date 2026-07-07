@@ -7,6 +7,8 @@ import { createAccessControl } from '../src/bot/accessControl.js';
 import { BotCommandHandler } from '../src/bot/handlers.js';
 import { VISIBLE_BOT_COMMANDS } from '../src/bot/createBot.js';
 import { ActiveDebarmentRepositories, DebarmentService } from '../src/domain/debarmentService.js';
+import { ActiveSecuritiesRepositories, SecuritiesService } from '../src/domain/securitiesService.js';
+import { SanctionedLookupService } from '../src/domain/sanctionedLookupService.js';
 import { SenzingMemoryRepository } from '../src/data/senzingMemoryRepository.js';
 import { buildSqliteDatabase } from '../src/data/sqliteBuilder.js';
 import { SqliteSenzingRepository, SqliteTargetDetailsRepository } from '../src/data/sqliteRepositories.js';
@@ -424,8 +426,10 @@ describe('data refresh service', () => {
 describe('admin /update handler and scheduler', () => {
   test('allows only admins to run /update and keeps update out of visible player menu', async () => {
     const refreshNow = vi.fn(async () => ({ status: 'current' as const, version: 'v1', message: 'Data already current.' }));
+    const debarmentService = new DebarmentService(SenzingMemoryRepository.fromRecords([]), TargetsNestedMemoryRepository.fromRecords([]));
+    const securitiesService = new SecuritiesService(new ActiveSecuritiesRepositories(SenzingMemoryRepository.fromRecords([])));
     const handler = new BotCommandHandler(
-      new DebarmentService(SenzingMemoryRepository.fromRecords([]), TargetsNestedMemoryRepository.fromRecords([])),
+      new SanctionedLookupService(debarmentService, securitiesService),
       createAccessControl('*', { adminTelegramUsers: '456' }),
       { refreshNow },
     );

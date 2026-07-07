@@ -10,6 +10,10 @@ export interface AppConfig {
   targetsNestedPath: string;
   sqlitePath: string;
   refreshMetadataPath: string;
+  securitiesSenzingPath: string;
+  securitiesTargetsNestedPath: string;
+  securitiesSqlitePath: string;
+  securitiesRefreshMetadataPath: string;
   refreshScheduleTime: string;
   maxResults: number;
   maxMessageChars: number;
@@ -40,6 +44,10 @@ export function loadConfig(
     targetsNestedPath: env.TARGETS_NESTED_PATH?.trim() || './targets.nested.json',
     sqlitePath: env.SQLITE_PATH?.trim() || './sanction.sqlite',
     refreshMetadataPath: env.REFRESH_METADATA_PATH?.trim() || './refresh-metadata.json',
+    securitiesSenzingPath: env.SECURITIES_SENZING_PATH?.trim() || './securities.senzing.json',
+    securitiesTargetsNestedPath: env.SECURITIES_TARGETS_NESTED_PATH?.trim() || './securities.targets.nested.json',
+    securitiesSqlitePath: env.SECURITIES_SQLITE_PATH?.trim() || './securities.sqlite',
+    securitiesRefreshMetadataPath: env.SECURITIES_REFRESH_METADATA_PATH?.trim() || './securities-refresh-metadata.json',
     refreshScheduleTime: scheduleTime(env.REFRESH_SCHEDULE_TIME, '05:00', 'REFRESH_SCHEDULE_TIME'),
     maxResults: positiveInteger(env.MAX_RESULTS, 5, 'MAX_RESULTS'),
     maxMessageChars: boundedPositiveInteger(env.MAX_MESSAGE_CHARS, 3800, 'MAX_MESSAGE_CHARS', TELEGRAM_MAX_MESSAGE_CHARS),

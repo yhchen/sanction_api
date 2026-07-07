@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3';
 
-export const SQLITE_SCHEMA_VERSION = '1';
+export const SQLITE_SCHEMA_VERSION = '2';
 
 export function initializeSqliteSchema(db: Database.Database): void {
   db.exec(`
@@ -12,7 +12,7 @@ export function initializeSqliteSchema(db: Database.Database): void {
     CREATE TABLE IF NOT EXISTS records (
       record_id TEXT PRIMARY KEY,
       record_json TEXT NOT NULL,
-      is_debarment INTEGER NOT NULL
+      is_included INTEGER NOT NULL
     );
 
     CREATE TABLE IF NOT EXISTS names (
@@ -38,7 +38,7 @@ export function initializeSqliteSchema(db: Database.Database): void {
 
     CREATE INDEX IF NOT EXISTS idx_names_normalized_name ON names(normalized_name);
     CREATE INDEX IF NOT EXISTS idx_names_record_id ON names(record_id);
-    CREATE INDEX IF NOT EXISTS idx_records_debarment ON records(is_debarment);
+    CREATE INDEX IF NOT EXISTS idx_records_included ON records(is_included);
   `);
 
   db.prepare('INSERT OR REPLACE INTO schema_metadata (key, value) VALUES (?, ?)').run('schema_version', SQLITE_SCHEMA_VERSION);
@@ -58,7 +58,7 @@ export function validateSqliteSchema(db: Database.Database): boolean {
       if (exists !== 1) return false;
     }
 
-    const requiredIndexes = ['idx_names_normalized_name', 'idx_names_record_id', 'idx_records_debarment'];
+    const requiredIndexes = ['idx_names_normalized_name', 'idx_names_record_id', 'idx_records_included'];
     for (const index of requiredIndexes) {
       const exists = db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = ?").pluck().get(index);
       if (exists !== 1) return false;

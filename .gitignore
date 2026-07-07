@@ -9,10 +9,13 @@ coverage/
 senzing.json
 targets.nested.json
 entities.ftm.json
+securities.senzing.json
+securities.targets.nested.json
 
 # Runtime Telegram access state
 approved-users.json
 refresh-metadata.json
+securities-refresh-metadata.json
 
 # Database
 db

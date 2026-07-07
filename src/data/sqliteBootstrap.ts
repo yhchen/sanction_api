@@ -4,12 +4,14 @@ import Database from 'better-sqlite3';
 import { buildSqliteDatabase, createEmptySqliteDatabase } from './sqliteBuilder.js';
 import { SqliteSenzingRepository, SqliteTargetDetailsRepository } from './sqliteRepositories.js';
 import { validateSqliteSchema } from './sqliteSchema.js';
+import type { SenzingRecord } from '../domain/types.js';
 
 export interface BootstrapSqliteOptions {
   senzingPath: string;
   targetsNestedPath: string;
   sqlitePath: string;
   minFuzzyScore?: number;
+  isIncludedRecord?: (record: SenzingRecord) => boolean;
 }
 
 export interface BootstrapSqliteResult {

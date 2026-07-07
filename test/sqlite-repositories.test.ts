@@ -149,6 +149,40 @@ describe('SQLite repositories', () => {
     });
   });
 
+  test('isIncludedRecord predicate overrides the default debarment-only filter', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'sqlite-repositories-included-'));
+    const senzingPath = path.join(dir, 'senzing.jsonl');
+    const targetsPath = path.join(dir, 'targets.nested.jsonl');
+    const sqlitePath = path.join(dir, 'sanction.sqlite');
+    const nonDebarmentRecord: SenzingRecord = {
+      DATA_SOURCE: 'TEST',
+      RECORD_ID: 'SECURITIES-1',
+      NAMES: [{ NAME_TYPE: 'PRIMARY', NAME_FULL: 'ACME SECURITIES LTD' }],
+      RISKS: [{ TOPIC: 'sanction' }],
+    };
+    await fs.writeFile(senzingPath, `${JSON.stringify(nonDebarmentRecord)}\n`, 'utf8');
+    await fs.writeFile(targetsPath, '', 'utf8');
+
+    await buildSqliteDatabase({ senzingPath, targetsNestedPath: targetsPath, sqlitePath, isIncludedRecord: () => true });
+
+    const includeAllRepository = SqliteSenzingRepository.open(sqlitePath);
+    try {
+      expect(includeAllRepository.findByName('ACME SECURITIES LTD')).toHaveLength(1);
+      expect(includeAllRepository.findByRecordId('SECURITIES-1')).toMatchObject({ RECORD_ID: 'SECURITIES-1' });
+    } finally {
+      includeAllRepository.close();
+    }
+
+    const defaultSqlitePath = path.join(dir, 'default.sqlite');
+    await buildSqliteDatabase({ senzingPath, targetsNestedPath: targetsPath, sqlitePath: defaultSqlitePath });
+    const defaultRepository = SqliteSenzingRepository.open(defaultSqlitePath);
+    try {
+      expect(defaultRepository.findByName('ACME SECURITIES LTD')).toHaveLength(0);
+    } finally {
+      defaultRepository.close();
+    }
+  });
+
   test('search scores all FTS recall rows before selecting the best candidates', async () => {
     const fillerRecords = Array.from({ length: 1001 }, (_, index) =>
       debarmentRecord(`AAA-FILLER-${String(index).padStart(4, '0')}`, `COMMON FILLER ${index}`),
