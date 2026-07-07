@@ -47,7 +47,9 @@ export function scoreSearchableName(
   const tokenCoverage = (exactTokenMatches + typoTokenMatches) / queryTokens.length;
   const prefixCoverage = prefixTokenMatches / queryTokens.length;
   const substringCoverage = substringTokenMatches / queryTokens.length;
-  const orderBonus = appearsInOrder(queryTokens, candidateTokens) ? 0.08 : 0;
+  const orderBonus = appearsInOrder(queryTokens, candidateTokens)
+    ? 0.08
+    : nearCompleteOrderedMatchBonus(queryTokens, candidateTokens, exactTokenMatches);
   const score = Math.min(0.94, tokenCoverage * 0.65 + prefixCoverage * 0.20 + substringCoverage * 0.10 + orderBonus);
   if (score < minFuzzyScore) return undefined;
 
@@ -86,6 +88,25 @@ function appearsInOrder(queryTokens: string[], candidateTokens: string[]): boole
     candidateIndex = nextIndex + 1;
   }
   return true;
+}
+
+function nearCompleteOrderedMatchBonus(
+  queryTokens: string[],
+  candidateTokens: string[],
+  exactTokenMatches: number,
+): number {
+  if (queryTokens.length < 6 || exactTokenMatches < queryTokens.length - 1) return 0;
+
+  let candidateIndex = 0;
+  let orderedExactMatches = 0;
+  for (const queryToken of queryTokens) {
+    const nextIndex = candidateTokens.findIndex((candidateToken, index) => index >= candidateIndex && candidateToken === queryToken);
+    if (nextIndex < 0) continue;
+    orderedExactMatches += 1;
+    candidateIndex = nextIndex + 1;
+  }
+
+  return orderedExactMatches >= queryTokens.length - 1 ? 0.04 : 0;
 }
 
 function damerauLevenshteinDistance(left: string, right: string, maxDistance: number): number {

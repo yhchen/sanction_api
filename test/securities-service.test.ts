@@ -20,8 +20,8 @@ const orgNameRecord: SenzingRecord = {
   RISKS: [{ TOPIC: 'sanction' }],
 };
 
-function service(records: SenzingRecord[]): SecuritiesService {
-  const repository = SenzingMemoryRepository.fromRecords(records);
+function service(records: SenzingRecord[], options: { minFuzzyScore?: number } = {}): SecuritiesService {
+  const repository = SenzingMemoryRepository.fromRecords(records, options);
   const activeRepositories = new ActiveSecuritiesRepositories(repository);
   return new SecuritiesService(activeRepositories);
 }
@@ -72,6 +72,19 @@ describe('SecuritiesService', () => {
 
   test('returns fuzzy candidates for NAME_ORG aliases', async () => {
     await expect(service([orgNameRecord]).searchCandidates('Dongguan Lvzhou')).resolves.toMatchObject({
+      found: true,
+      candidates: [{
+        basic: {
+          recordId: 'NK-Vq8tbLjL9hai2V7Jx8PYe4',
+          primaryName: 'Dongguan Oasis Shoes Co. Ltd.',
+        },
+        matchedName: 'Dongguan Lvzhou Shoes Co. Ltd.',
+      }],
+    });
+  });
+
+  test('returns high-threshold fuzzy candidates when one organization descriptor token is added', async () => {
+    await expect(service([orgNameRecord], { minFuzzyScore: 0.8 }).searchCandidates('Dongguan Lvzhou Shoes Industry Co. Ltd')).resolves.toMatchObject({
       found: true,
       candidates: [{
         basic: {
