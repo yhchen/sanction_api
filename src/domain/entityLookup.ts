@@ -8,6 +8,7 @@ import type {
   SenzingNameMatch,
   TargetDetailsRepository,
 } from './types.js';
+import { extractedSenzingNames, primarySenzingName } from './senzingNames.js';
 
 /**
  * Generic name-match formatting/materialization helpers shared by `DebarmentService` and
@@ -71,7 +72,7 @@ export function materializeMatches(
 
 export function toBasicInfo(match: SenzingNameMatch): BasicInfo {
   const record = match.record;
-  const primaryName = getPrimaryName(record) ?? match.matchedName;
+  const primaryName = primarySenzingName(record) ?? match.matchedName;
 
   return {
     recordId: record.RECORD_ID,
@@ -79,10 +80,9 @@ export function toBasicInfo(match: SenzingNameMatch): BasicInfo {
     matchedName: match.matchedName,
     matchedNameType: match.matchedNameType,
     aliases: unique(
-      (record.NAMES ?? [])
-        .filter((name) => name.NAME_FULL && name.NAME_FULL !== primaryName)
-        .map((name) => name.NAME_FULL?.trim())
-        .filter(isNonEmptyString),
+      extractedSenzingNames(record)
+        .map((name) => name.value)
+        .filter((name) => name !== primaryName),
     ),
     risks: unique((record.RISKS ?? []).map((risk) => risk.TOPIC?.trim()).filter(isNonEmptyString)),
     countries: unique(
@@ -106,13 +106,6 @@ export function toBasicInfo(match: SenzingNameMatch): BasicInfo {
     ),
     url: record.URL?.trim() || undefined,
   };
-}
-
-function getPrimaryName(record: SenzingNameMatch['record']): string | undefined {
-  return (
-    (record.NAMES ?? []).find((name) => name.NAME_TYPE?.toLocaleUpperCase('en-US') === 'PRIMARY')?.NAME_FULL?.trim() ??
-    (record.NAMES ?? [])[0]?.NAME_FULL?.trim()
-  );
 }
 
 function compactObjectValues(object: Record<string, unknown>): string {

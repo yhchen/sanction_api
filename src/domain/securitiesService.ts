@@ -1,8 +1,8 @@
 import { emptyResult, materializeMatches, repositoryDataStatus, toCandidate, uniqueCandidatesByRecord } from './entityLookup.js';
+import { primarySenzingName } from './senzingNames.js';
 import type {
   EntityCandidateSearchResult,
   EntityQueryResult,
-  SenzingRecord,
   SenzingLookupRepository,
   TargetDetailsRepository,
 } from './types.js';
@@ -108,7 +108,7 @@ export class SecuritiesService {
     const record = repositories.senzingRepository.findByRecordId(recordId);
     if (!record) return emptyResult(recordId, dataStatus);
 
-    const primaryName = getPrimaryName(record) ?? record.RECORD_ID;
+    const primaryName = primarySenzingName(record) ?? record.RECORD_ID;
     return materializeMatches(
       recordId,
       [{ record, matchedName: primaryName, matchedNameType: 'RECORD_ID' }],
@@ -118,11 +118,4 @@ export class SecuritiesService {
       this.maxResults,
     );
   }
-}
-
-function getPrimaryName(record: SenzingRecord): string | undefined {
-  return (
-    (record.NAMES ?? []).find((name) => name.NAME_TYPE?.toLocaleUpperCase('en-US') === 'PRIMARY')?.NAME_FULL?.trim() ??
-    (record.NAMES ?? [])[0]?.NAME_FULL?.trim()
-  );
 }

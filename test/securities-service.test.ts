@@ -10,6 +10,16 @@ const nonDebarmentRecord: SenzingRecord = {
   RISKS: [{ TOPIC: 'sanction.linked' }],
 };
 
+const orgNameRecord: SenzingRecord = {
+  DATA_SOURCE: 'OS_US_DHS_UFLPA',
+  RECORD_ID: 'NK-Vq8tbLjL9hai2V7Jx8PYe4',
+  NAMES: [
+    { NAME_TYPE: 'PRIMARY', NAME_ORG: 'Dongguan Oasis Shoes Co. Ltd.' },
+    { NAME_TYPE: 'ALIAS', NAME_ORG: 'Dongguan Lvzhou Shoes Co. Ltd.' },
+  ],
+  RISKS: [{ TOPIC: 'sanction' }],
+};
+
 function service(records: SenzingRecord[]): SecuritiesService {
   const repository = SenzingMemoryRepository.fromRecords(records);
   const activeRepositories = new ActiveSecuritiesRepositories(repository);
@@ -43,6 +53,46 @@ describe('SecuritiesService', () => {
     await expect(service([nonDebarmentRecord]).searchCandidates('Acme Securities')).resolves.toMatchObject({
       found: true,
       candidates: [{ basic: { recordId: 'us-ofac-sdn-1' } }],
+    });
+  });
+
+  test('returns exact matches for NAME_ORG aliases', async () => {
+    await expect(service([orgNameRecord]).check('Dongguan Lvzhou Shoes Co. Ltd.')).resolves.toMatchObject({
+      found: true,
+      matches: [{
+        basic: {
+          recordId: 'NK-Vq8tbLjL9hai2V7Jx8PYe4',
+          primaryName: 'Dongguan Oasis Shoes Co. Ltd.',
+          matchedName: 'Dongguan Lvzhou Shoes Co. Ltd.',
+          aliases: ['Dongguan Lvzhou Shoes Co. Ltd.'],
+        },
+      }],
+    });
+  });
+
+  test('returns fuzzy candidates for NAME_ORG aliases', async () => {
+    await expect(service([orgNameRecord]).searchCandidates('Dongguan Lvzhou')).resolves.toMatchObject({
+      found: true,
+      candidates: [{
+        basic: {
+          recordId: 'NK-Vq8tbLjL9hai2V7Jx8PYe4',
+          primaryName: 'Dongguan Oasis Shoes Co. Ltd.',
+        },
+        matchedName: 'Dongguan Lvzhou Shoes Co. Ltd.',
+      }],
+    });
+  });
+
+  test('fullByRecordId displays NAME_ORG primary names', async () => {
+    await expect(service([orgNameRecord]).fullByRecordId('NK-Vq8tbLjL9hai2V7Jx8PYe4')).resolves.toMatchObject({
+      found: true,
+      matches: [{
+        basic: {
+          recordId: 'NK-Vq8tbLjL9hai2V7Jx8PYe4',
+          primaryName: 'Dongguan Oasis Shoes Co. Ltd.',
+          matchedName: 'Dongguan Oasis Shoes Co. Ltd.',
+        },
+      }],
     });
   });
 });

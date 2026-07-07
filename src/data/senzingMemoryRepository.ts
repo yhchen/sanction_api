@@ -1,5 +1,6 @@
 import { normalizeName } from '../domain/normalize.js';
 import { DEFAULT_MIN_FUZZY_SCORE, normalizedTokens, scoreSearchableName } from '../domain/nameScoring.js';
+import { extractedSenzingNames } from '../domain/senzingNames.js';
 import type { RepositoryStats, SenzingLookupRepository, SenzingNameCandidate, SenzingNameMatch, SenzingRecord } from '../domain/types.js';
 import { readJsonlFile } from './jsonl.js';
 
@@ -93,15 +94,13 @@ export class SenzingMemoryRepository implements SenzingLookupRepository {
     this.recordsById.set(record.RECORD_ID, record);
     const seenNormalizedNamesForRecord = new Set<string>();
 
-    for (const name of record.NAMES ?? []) {
-      const fullName = name.NAME_FULL?.trim();
-      if (!fullName) continue;
-      const normalized = normalizeName(fullName);
+    for (const name of extractedSenzingNames(record)) {
+      const normalized = normalizeName(name.value);
       if (!normalized || seenNormalizedNamesForRecord.has(normalized)) continue;
       seenNormalizedNamesForRecord.add(normalized);
 
       const matches = this.nameIndex.get(normalized) ?? [];
-      const match = { record, matchedName: fullName, matchedNameType: name.NAME_TYPE };
+      const match = { record, matchedName: name.value, matchedNameType: name.type };
       matches.push(match);
       this.nameIndex.set(normalized, matches);
       this.searchableNames.push({ ...match, normalizedName: normalized, normalizedTokens: normalizedTokens(normalized) });
